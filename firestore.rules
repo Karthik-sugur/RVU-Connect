@@ -24,6 +24,11 @@ service cloud.firestore {
       return myUserDoc().data.role;
     }
 
+    function isNotSuspended() {
+      return !exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.suspended != true;
+    }
+
     function isSuperAdmin() {
       return isRvuEmail()
         && (
@@ -59,14 +64,14 @@ service cloud.firestore {
     }
 
     match /users/{uid} {
-      allow create: if isRvuEmail()
+      allow create: if isRvuEmail() && isNotSuspended()
         && createsOwnDoc(uid)
         && request.resource.data.role == 'student'
         && request.resource.data.email == request.auth.token.email;
 
       allow read: if isSuperAdmin() || (isRvuEmail() && createsOwnDoc(uid));
 
-      allow update: if isRvuEmail()
+      allow update: if isRvuEmail() && isNotSuspended()
         && createsOwnDoc(uid)
         && request.resource.data.diff(resource.data).affectedKeys()
           .hasOnly(['name', 'school', 'year', 'interests', 'onboardingComplete', 'clubIds', 'updatedAt']);
@@ -108,7 +113,7 @@ service cloud.firestore {
     }
 
     match /contentReviews/{reviewId} {
-      allow create: if isRvuEmail();
+      allow create: if isRvuEmail() && isNotSuspended();
       allow read, update, delete: if isSuperAdmin();
     }
 
@@ -119,7 +124,7 @@ service cloud.firestore {
       match /representatives/{uid} {
         allow read: if isSuperAdmin() || createsOwnDoc(uid) || isApprovedSchoolRep(schoolId);
 
-        allow create: if isRvuEmail()
+        allow create: if isRvuEmail() && isNotSuspended()
           && createsOwnDoc(uid)
           && request.resource.data.status == 'pending'
           && request.resource.data.email == request.auth.token.email;
@@ -133,11 +138,11 @@ service cloud.firestore {
       allow read: if isRvuEmail() && (resource.data.status == 'approved' || isSuperAdmin() || isApprovedClubCore(clubId));
       allow create, update, delete: if isSuperAdmin();
 
-      allow update: if isApprovedClubCore(clubId)
+      allow update: if isApprovedClubCore(clubId) && isNotSuspended()
         && request.resource.data.diff(resource.data).affectedKeys()
           .hasOnly(['description', 'doing', 'highlights', 'joinLink', 'registrationOpen', 'updatedAt']);
 
-      allow update: if isClubPresident(clubId)
+      allow update: if isClubPresident(clubId) && isNotSuspended()
         && request.resource.data.diff(resource.data).affectedKeys()
           .hasOnly([
             'description',
@@ -183,7 +188,7 @@ service cloud.firestore {
     match /events/{eventId} {
       allow read: if isRvuEmail() && (isPublished() || isSuperAdmin());
 
-      allow create: if isRvuEmail()
+      allow create: if isRvuEmail() && isNotSuspended()
         && (
           (request.resource.data.hostType == 'club'
             && isApprovedClubCore(request.resource.data.clubId))
@@ -200,14 +205,14 @@ service cloud.firestore {
 
       match /rsvps/{uid} {
         allow read: if isSuperAdmin() || createsOwnDoc(uid);
-        allow create, update, delete: if isRvuEmail() && createsOwnDoc(uid);
+        allow create, update, delete: if isRvuEmail() && isNotSuspended() && createsOwnDoc(uid);
       }
     }
 
     match /announcements/{announcementId} {
       allow read: if isRvuEmail() && (isPublished() || isSuperAdmin());
 
-      allow create: if isRvuEmail()
+      allow create: if isRvuEmail() && isNotSuspended()
         && (
           (request.resource.data.sourceType == 'club'
             && isApprovedClubCore(request.resource.data.clubId))
@@ -226,7 +231,7 @@ service cloud.firestore {
     match /projects/{projectId} {
       allow read: if isRvuEmail();
 
-      allow create: if isRvuEmail()
+      allow create: if isRvuEmail() && isNotSuspended()
         && request.resource.data.ownerId == request.auth.uid
         && request.resource.data.status in ['open', 'closed'];
 
@@ -238,7 +243,7 @@ service cloud.firestore {
           || createsOwnDoc(uid)
           || get(/databases/$(database)/documents/projects/$(projectId)).data.ownerId == request.auth.uid;
 
-        allow create: if isRvuEmail()
+        allow create: if isRvuEmail() && isNotSuspended()
           && createsOwnDoc(uid)
           && request.resource.data.userId == request.auth.uid;
 
@@ -249,7 +254,7 @@ service cloud.firestore {
     }
 
     match /hostRequests/{requestId} {
-      allow create: if isRvuEmail()
+      allow create: if isRvuEmail() && isNotSuspended()
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.status == 'pending'
         && request.resource.data.type in ['clubCore', 'schoolRepresentative'];
@@ -261,7 +266,7 @@ service cloud.firestore {
     }
 
     match /moderationFlags/{flagId} {
-      allow create: if isRvuEmail();
+      allow create: if isRvuEmail() && isNotSuspended();
       allow read, update, delete: if isSuperAdmin();
     }
 
