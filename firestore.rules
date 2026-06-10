@@ -64,9 +64,9 @@ service cloud.firestore {
         && request.resource.data.role == 'student'
         && request.resource.data.email == request.auth.token.email;
 
-      allow read: if isSuperAdmin() || (signedIn() && createsOwnDoc(uid));
+      allow read: if isSuperAdmin() || (isRvuEmail() && createsOwnDoc(uid));
 
-      allow update: if signedIn()
+      allow update: if isRvuEmail()
         && createsOwnDoc(uid)
         && request.resource.data.diff(resource.data).affectedKeys()
           .hasOnly(['name', 'school', 'year', 'interests', 'onboardingComplete', 'updatedAt']);
@@ -98,7 +98,7 @@ service cloud.firestore {
     }
 
     match /siteSettings/{settingId} {
-      allow read: if signedIn();
+      allow read: if isRvuEmail();
       allow create, update, delete: if isSuperAdmin();
     }
 
@@ -113,7 +113,7 @@ service cloud.firestore {
     }
 
     match /schools/{schoolId} {
-      allow read: if signedIn();
+      allow read: if isRvuEmail();
       allow create, update, delete: if isSuperAdmin();
 
       match /representatives/{uid} {
@@ -130,7 +130,7 @@ service cloud.firestore {
     }
 
     match /clubs/{clubId} {
-      allow read: if signedIn() && (resource.data.status == 'approved' || isSuperAdmin() || isApprovedClubCore(clubId));
+      allow read: if isRvuEmail() && (resource.data.status == 'approved' || isSuperAdmin() || isApprovedClubCore(clubId));
       allow create, update, delete: if isSuperAdmin();
 
       allow update: if isApprovedClubCore(clubId)
@@ -181,7 +181,7 @@ service cloud.firestore {
     }
 
     match /events/{eventId} {
-      allow read: if signedIn() && (isPublished() || isSuperAdmin());
+      allow read: if isRvuEmail() && (isPublished() || isSuperAdmin());
 
       allow create: if isRvuEmail()
         && (
@@ -205,7 +205,7 @@ service cloud.firestore {
     }
 
     match /announcements/{announcementId} {
-      allow read: if signedIn() && (isPublished() || isSuperAdmin());
+      allow read: if isRvuEmail() && (isPublished() || isSuperAdmin());
 
       allow create: if isRvuEmail()
         && (
@@ -224,7 +224,7 @@ service cloud.firestore {
     }
 
     match /projects/{projectId} {
-      allow read: if signedIn();
+      allow read: if isRvuEmail();
 
       allow create: if isRvuEmail()
         && request.resource.data.ownerId == request.auth.uid
@@ -255,7 +255,7 @@ service cloud.firestore {
         && request.resource.data.type in ['clubCore', 'schoolRepresentative'];
 
       allow read: if isSuperAdmin()
-        || (signedIn() && resource.data.uid == request.auth.uid);
+        || (isRvuEmail() && resource.data.uid == request.auth.uid);
 
       allow update, delete: if isSuperAdmin();
     }

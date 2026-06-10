@@ -1,3 +1,68 @@
+
+async function promptUser(message, defaultValue = "") {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    Object.assign(overlay.style, {
+      position: "fixed", top: "0", left: "0", width: "100%", height: "100%",
+      backgroundColor: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center",
+      justifyContent: "center", zIndex: "10000"
+    });
+
+    const modal = document.createElement("div");
+    Object.assign(modal.style, {
+      backgroundColor: "#fff", padding: "24px", borderRadius: "8px", width: "300px",
+      maxWidth: "90%", boxShadow: "0 4px 12px rgba(0,0,0,0.15)", fontFamily: "inherit"
+    });
+
+    const label = document.createElement("p");
+    label.innerText = message;
+    Object.assign(label.style, {
+      marginTop: "0", marginBottom: "16px", fontWeight: "600", color: "#1d1a16", fontSize: "14px"
+    });
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.value = defaultValue;
+    Object.assign(input.style, {
+      width: "100%", padding: "8px", border: "1px solid #ccc", borderRadius: "4px",
+      boxSizing: "border-box", marginBottom: "24px", fontSize: "14px"
+    });
+
+    const btnContainer = document.createElement("div");
+    Object.assign(btnContainer.style, {
+      display: "flex", justifyContent: "flex-end", gap: "12px"
+    });
+
+    const cancelBtn = document.createElement("button");
+    cancelBtn.innerText = "Cancel";
+    Object.assign(cancelBtn.style, {
+      padding: "8px 16px", border: "1px solid #ccc", backgroundColor: "transparent",
+      borderRadius: "4px", cursor: "pointer", fontSize: "13px"
+    });
+
+    const okBtn = document.createElement("button");
+    okBtn.innerText = "OK";
+    Object.assign(okBtn.style, {
+      padding: "8px 16px", border: "none", backgroundColor: "#d4af37",
+      color: "#1d1a16", borderRadius: "4px", fontWeight: "600", cursor: "pointer", fontSize: "13px"
+    });
+
+    btnContainer.append(cancelBtn, okBtn);
+    modal.append(label, input, btnContainer);
+    overlay.append(modal);
+    document.body.append(overlay);
+    input.focus();
+
+    const cleanup = () => document.body.removeChild(overlay);
+    cancelBtn.onclick = () => { cleanup(); resolve(null); };
+    okBtn.onclick = () => { cleanup(); resolve(input.value); };
+    input.onkeydown = (e) => {
+      if (e.key === "Enter") okBtn.onclick();
+      if (e.key === "Escape") cancelBtn.onclick();
+    };
+  });
+}
+
 import { applyDemoCampusData } from "./sample-data.js";
 
 const schools = [
@@ -172,39 +237,48 @@ async function enter(user) {
 }
 
 function render() {
-  if (state.loading) {
-    app.innerHTML = `<main class="login"><div class="login-card"><p class="eyebrow">RVU Connect</p><h1>Loading admin</h1></div></main>`;
-    return;
-  }
+  try {
+    if (state.loading) {
+      app.innerHTML = `<main class="login"><div class="login-card"><p class="eyebrow">RVU Connect</p><h1>Loading admin</h1></div></main>`;
+      return;
+    }
 
-  if (!state.user) {
-    app.innerHTML = renderLogin();
+    if (!state.user) {
+      app.innerHTML = renderLogin();
+      bindEvents();
+      return;
+    }
+
+    if (!isSuperAdmin()) {
+      app.innerHTML = renderDenied();
+      bindEvents();
+      return;
+    }
+
+    app.innerHTML = `
+      <div class="admin-site">
+        ${renderRail()}
+        <main class="main">
+          <section class="hero">
+            <p class="eyebrow">Separate Super Admin Website</p>
+            <h2>${tabTitle()}</h2>
+            <p>Full platform control for RVU Connect, separated from the student and host campus app but running on the same Firebase project.</p>
+          </section>
+          ${renderSummary()}
+          <section class="content">${renderTab()}</section>
+        </main>
+      </div>
+      ${state.toast ? `<div class="toast">${escapeHtml(state.toast)}</div>` : ""}
+    `;
     bindEvents();
-    return;
+  } catch (err) {
+    console.error("Render Error:", err);
+    app.innerHTML = `<div style="padding:40px; text-align:center;">
+      <h2 style="color:#d93025; font-family:inherit;">Admin Panel Error</h2>
+      <p style="color:#666; font-family:inherit;">${err.message}</p>
+      <button onclick="window.location.reload()" style="padding:10px 20px; background:#d4af37; border:none; border-radius:4px; margin-top:20px; cursor:pointer; color:#1d1a16; font-weight:600;">Reload App</button>
+    </div>`;
   }
-
-  if (!isSuperAdmin()) {
-    app.innerHTML = renderDenied();
-    bindEvents();
-    return;
-  }
-
-  app.innerHTML = `
-    <div class="admin-site">
-      ${renderRail()}
-      <main class="main">
-        <section class="hero">
-          <p class="eyebrow">Separate Super Admin Website</p>
-          <h2>${tabTitle()}</h2>
-          <p>Full platform control for RVU Connect, separated from the student and host campus app but running on the same Firebase project.</p>
-        </section>
-        ${renderSummary()}
-        <section class="content">${renderTab()}</section>
-      </main>
-    </div>
-    ${state.toast ? `<div class="toast">${escapeHtml(state.toast)}</div>` : ""}
-  `;
-  bindEvents();
 }
 
 function renderLogin() {
@@ -856,13 +930,13 @@ async function handleAction(action, id) {
   }
   if (action === "club-leadership") {
     const club = state.data.allClubs.find((item) => item.id === id) || {};
-    const currentPresidentName = window.prompt("Current president name", club.currentPresidentName || "");
+    const currentPresidentName = await promptUser("Current president name", club.currentPresidentName || "");
     if (currentPresidentName == null) return;
-    const currentPresidentEmail = window.prompt("Current president RVU email", club.currentPresidentEmail || "");
+    const currentPresidentEmail = await promptUser("Current president RVU email", club.currentPresidentEmail || "");
     if (!isRvuEmail(currentPresidentEmail)) return window.alert("President email must end with @rvu.edu.in.");
-    const facultyAdvisorName = window.prompt("Faculty advisor name", club.facultyAdvisorName || "");
+    const facultyAdvisorName = await promptUser("Faculty advisor name", club.facultyAdvisorName || "");
     if (facultyAdvisorName == null) return;
-    const facultyAdvisorEmail = window.prompt("Faculty advisor RVU email", club.facultyAdvisorEmail || "");
+    const facultyAdvisorEmail = await promptUser("Faculty advisor RVU email", club.facultyAdvisorEmail || "");
     if (!isRvuEmail(facultyAdvisorEmail)) return window.alert("Advisor email must end with @rvu.edu.in.");
     await window.RVUFirebase.updateClubLeadership(id, { currentPresidentName, currentPresidentEmail, facultyAdvisorName, facultyAdvisorEmail });
     await window.RVUFirebase.assignClubCoreRole(id, { email: currentPresidentEmail, name: currentPresidentName, role: "president" });
@@ -872,17 +946,17 @@ async function handleAction(action, id) {
     return;
   }
   if (action === "club-core") {
-    const email = window.prompt("Core member RVU email");
+    const email = await promptUser("Core member RVU email");
     if (!isRvuEmail(email)) return window.alert("Core email must end with @rvu.edu.in.");
-    const name = window.prompt("Core member name") || email;
-    const role = window.prompt("Core role") || "core";
+    const name = await promptUser("Core member name") || email;
+    const role = await promptUser("Core role") || "core";
     await window.RVUFirebase.assignClubCoreRole(id, { email, name, role });
     await refresh();
     showToast("Core role assigned.");
     return;
   }
   if (action === "remove-core") {
-    const email = window.prompt("Core member RVU email to remove");
+    const email = await promptUser("Core member RVU email to remove");
     if (!email) return;
     if (!window.confirm(`Remove ${email} from this club core?`)) return;
     await window.RVUFirebase.removeClubCoreRole(id, email);
@@ -998,9 +1072,9 @@ async function handleAction(action, id) {
     return;
   }
   if (action === "project-application-status") {
-    const userId = window.prompt("Applicant Firebase UID");
+    const userId = await promptUser("Applicant Firebase UID");
     if (!userId) return;
-    const status = window.prompt("Status: pending, accepted, rejected", "accepted") || "accepted";
+    const status = await promptUser("Status: pending, accepted, rejected", "accepted") || "accepted";
     await window.RVUFirebase.updateProjectApplicationStatus(id, userId, status);
     await refresh();
     showToast("Project application updated.");
@@ -1017,9 +1091,18 @@ function bindEvents() {
   });
   document.querySelectorAll("[data-action]").forEach((button) => {
     button.addEventListener("click", () => {
-      handleAction(button.dataset.action, button.dataset.id).catch((error) => {
-        window.alert(error.message || "Action failed.");
-      });
+      const origPointer = button.style.pointerEvents;
+      const origOpacity = button.style.opacity;
+      button.style.pointerEvents = "none";
+      button.style.opacity = "0.5";
+      handleAction(button.dataset.action, button.dataset.id)
+        .catch((error) => {
+          window.alert(error.message || "Action failed.");
+        })
+        .finally(() => {
+          button.style.pointerEvents = origPointer;
+          button.style.opacity = origOpacity;
+        });
     });
   });
   document.querySelectorAll("[data-field]").forEach((field) => {

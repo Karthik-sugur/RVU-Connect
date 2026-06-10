@@ -16,12 +16,16 @@ import {
   doc,
   getDoc,
   getDocs,
-  getFirestore,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
   query,
   serverTimestamp,
   setDoc,
   updateDoc,
   where,
+  limit,
+  writeBatch,
 } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -38,7 +42,9 @@ const RVU_EMAIL_DOMAIN = "@rvu.edu.in";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
-const db = getFirestore(app);
+const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+});
 const analytics = await analyticsIsSupported().then((supported) => supported ? getAnalytics(app) : null);
 
 function isRvuEmail(email) {
@@ -91,14 +97,24 @@ async function rowsOrEmpty(label, promise) {
   }
 }
 
+let _cachedSuperAdminResult = null;
+
 async function hasSuperAdminGrant(user) {
   if (!user?.uid || !user?.email) return false;
+  if (_cachedSuperAdminResult !== null) return _cachedSuperAdminResult;
   const email = user.email.trim();
   const [uidGrant, emailGrant] = await Promise.all([
-    getDoc(doc(db, "superAdmins", user.uid)).catch(() => null),
-    getDoc(doc(db, "superAdmins", email)).catch(() => null),
+    getDoc(doc(db, "superAdmins", user.uid)).catch((err) => {
+      console.warn("Failed to check superAdmin uid:", err);
+      return null;
+    }),
+    getDoc(doc(db, "superAdmins", email)).catch((err) => {
+      console.warn("Failed to check superAdmin email:", err);
+      return null;
+    }),
   ]);
-  return Boolean(uidGrant?.exists() || emailGrant?.exists());
+  _cachedSuperAdminResult = Boolean(uidGrant?.exists() || emailGrant?.exists());
+  return _cachedSuperAdminResult;
 }
 
 async function ensureUserProfile(user) {
@@ -110,17 +126,36 @@ async function ensureUserProfile(user) {
     return superAdmin ? { ...profile, role: "superAdmin" } : profile;
   }
 
+  const clubsSnap = await getDocs(query(collection(db, "clubs"), where("status", "==", "approved")));
+  let assignedClubId = null;
+  let assignedRoleTitle = "Core Member";
+  const email = user.email.toLowerCase();
+
+  for (const docSnap of clubsSnap.docs) {
+    const memberSnap = await getDoc(doc(db, "clubs", docSnap.id, "coreMembers", email)).catch((err) => {
+      console.warn(`Failed to check core member status for club ${docSnap.id}:`, err);
+      return null;
+    });
+    if (memberSnap?.exists() && memberSnap.data().status === "approved") {
+      assignedClubId = docSnap.id;
+      assignedRoleTitle = memberSnap.data().role || "Core Member";
+      break;
+    }
+  }
+
   const profile = {
     email: user.email,
     name: user.displayName || user.email.split("@")[0],
-    role: "student",
+    role: superAdmin ? "superAdmin" : (assignedClubId ? "clubCore" : "student"),
+    clubId: assignedClubId,
+    roleTitle: assignedRoleTitle,
     interests: [],
-    onboardingComplete: superAdmin,
+    onboardingComplete: superAdmin || !!assignedClubId,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
   await setDoc(ref, profile);
-  return { id: user.uid, ...profile, role: superAdmin ? "superAdmin" : "student" };
+  return { id: user.uid, ...profile };
 }
 
 async function saveUserProfile(uid, data) {
@@ -130,12 +165,12 @@ async function saveUserProfile(uid, data) {
   });
 }
 
-async function loadCampusData({ superAdmin = false } = {}) {
+async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
   const [clubsRows, eventRows, announcementRows, projectRows, settingsRows] = await Promise.all([
-    rowsOrEmpty("approved clubs", getDocs(query(collection(db, "clubs"), where("status", "==", "approved")))),
-    rowsOrEmpty("published events", getDocs(query(collection(db, "events"), where("status", "==", "published")))),
-    rowsOrEmpty("published announcements", getDocs(query(collection(db, "announcements"), where("status", "==", "published")))),
-    rowsOrEmpty("projects", getDocs(collection(db, "projects"))),
+    rowsOrEmpty("approved clubs", getDocs(query(collection(db, "clubs"), where("status", "==", "approved"), limit(100)))),
+    rowsOrEmpty("published events", getDocs(query(collection(db, "events"), where("status", "==", "published"), limit(100)))),
+    rowsOrEmpty("published announcements", getDocs(query(collection(db, "announcements"), where("status", "==", "published"), limit(100)))),
+    rowsOrEmpty("projects", getDocs(query(collection(db, "projects"), limit(100)))),
     rowsOrEmpty("site settings", getDocs(collection(db, "siteSettings"))),
   ]);
 
@@ -164,16 +199,22 @@ async function loadCampusData({ superAdmin = false } = {}) {
   if (auth.currentUser?.email) {
     const email = auth.currentUser.email;
     const uid = auth.currentUser.uid;
-    const [memberDocs, savedRows, followRows, rsvpRows, applicationRows] = await Promise.all([
-      Promise.all(data.clubs.map(async (club) => {
-      const memberSnap = await getDoc(doc(db, "clubs", club.id, "coreMembers", email));
-      return memberSnap.exists() ? { club, member: { id: memberSnap.id, ...memberSnap.data() } } : null;
-      })),
+    const [savedRows, followRows, rsvpRows, applicationRows] = await Promise.all([
       rowsOrEmpty("saved items", getDocs(collection(db, "users", uid, "savedItems"))),
       rowsOrEmpty("followed clubs", getDocs(collection(db, "users", uid, "followedClubs"))),
       rowsOrEmpty("event RSVPs", getDocs(collection(db, "users", uid, "rsvps"))),
       rowsOrEmpty("project applications", getDocs(collection(db, "users", uid, "applications"))),
     ]);
+    let memberDocs = [];
+    if (profile.clubId) {
+      const club = data.clubs.find(c => c.id === profile.clubId || c.slug === profile.clubId);
+      if (club) {
+        const memberSnap = await getDoc(doc(db, "clubs", club.id, "coreMembers", email));
+        if (memberSnap.exists() && memberSnap.data().status === "approved") {
+          memberDocs.push({ club, member: { id: memberSnap.id, ...memberSnap.data() } });
+        }
+      }
+    }
     data.clubAccess = memberDocs.find((entry) => entry?.member?.status === "approved") || null;
     data.savedItems = savedRows;
     data.followedClubs = followRows;
@@ -183,15 +224,15 @@ async function loadCampusData({ superAdmin = false } = {}) {
 
   if (superAdmin) {
     const [requestsRows, flagsRows, userRows, allEventRows, allAnnouncementRows, allClubRows, allSchoolRows, auditRows, reviewRows] = await Promise.all([
-      rowsOrEmpty("host requests", getDocs(collection(db, "hostRequests"))),
-      rowsOrEmpty("moderation flags", getDocs(collection(db, "moderationFlags"))),
-      rowsOrEmpty("users", getDocs(collection(db, "users"))),
-      rowsOrEmpty("all events", getDocs(collection(db, "events"))),
-      rowsOrEmpty("all announcements", getDocs(collection(db, "announcements"))),
-      rowsOrEmpty("all clubs", getDocs(collection(db, "clubs"))),
-      rowsOrEmpty("all schools", getDocs(collection(db, "schools"))),
-      rowsOrEmpty("audit logs", getDocs(collection(db, "auditLogs"))),
-      rowsOrEmpty("content reviews", getDocs(collection(db, "contentReviews"))),
+      rowsOrEmpty("host requests", getDocs(query(collection(db, "hostRequests"), limit(100)))),
+      rowsOrEmpty("moderation flags", getDocs(query(collection(db, "moderationFlags"), limit(100)))),
+      rowsOrEmpty("users", getDocs(query(collection(db, "users"), limit(100)))),
+      rowsOrEmpty("all events", getDocs(query(collection(db, "events"), limit(100)))),
+      rowsOrEmpty("all announcements", getDocs(query(collection(db, "announcements"), limit(100)))),
+      rowsOrEmpty("all clubs", getDocs(query(collection(db, "clubs"), limit(100)))),
+      rowsOrEmpty("all schools", getDocs(query(collection(db, "schools"), limit(100)))),
+      rowsOrEmpty("audit logs", getDocs(query(collection(db, "auditLogs"), limit(100)))),
+      rowsOrEmpty("content reviews", getDocs(query(collection(db, "contentReviews"), limit(100)))),
     ]);
     data.hostRequests = requestsRows;
     data.moderationFlags = flagsRows;
@@ -409,7 +450,9 @@ async function logAudit(action, collectionName, targetId, title = "") {
     adminEmail: auth.currentUser.email,
     adminId: auth.currentUser.uid,
     createdAt: serverTimestamp(),
-  }).catch(() => null);
+  }).catch((err) => {
+    console.warn("Failed to log audit action:", err);
+  });
 }
 
 async function grantPlatformRole({ email, uid, role }) {
@@ -443,6 +486,17 @@ async function assignClubCoreRole(clubId, { email, name, role }) {
     updatedAt: serverTimestamp(),
   }, { merge: true });
 
+  const usersSnap = await getDocs(query(collection(db, "users"), where("email", "==", normalizedEmail), limit(1)));
+  if (!usersSnap.empty) {
+    await updateDoc(doc(db, "users", usersSnap.docs[0].id), {
+      role: "clubCore",
+      clubId: clubId,
+      roleTitle: normalizedRole,
+      hostApproved: true,
+      updatedAt: serverTimestamp()
+    });
+  }
+
   if (normalizedRole.toLowerCase() === "president") {
     await updateClubLeadership(clubId, {
       currentPresidentEmail: normalizedEmail,
@@ -452,7 +506,18 @@ async function assignClubCoreRole(clubId, { email, name, role }) {
 }
 
 async function removeClubCoreRole(clubId, email) {
-  await firestoreDeleteDoc(doc(db, "clubs", clubId, "coreMembers", email.trim().toLowerCase()));
+  const normalizedEmail = email.trim().toLowerCase();
+  await firestoreDeleteDoc(doc(db, "clubs", clubId, "coreMembers", normalizedEmail));
+  const usersSnap = await getDocs(query(collection(db, "users"), where("email", "==", normalizedEmail), limit(1)));
+  if (!usersSnap.empty) {
+    await updateDoc(doc(db, "users", usersSnap.docs[0].id), {
+      role: "student",
+      clubId: null,
+      roleTitle: null,
+      hostApproved: false,
+      updatedAt: serverTimestamp()
+    });
+  }
 }
 
 async function updateClubLeadership(clubId, data) {
@@ -570,7 +635,8 @@ async function unfollowClub(clubId) {
 async function rsvpEvent(eventId, payload = {}) {
   const user = auth.currentUser;
   if (!user) throw new Error("Sign in first.");
-  await setDoc(doc(db, "events", eventId, "rsvps", user.uid), {
+  const batch = writeBatch(db);
+  batch.set(doc(db, "events", eventId, "rsvps", user.uid), {
     userId: user.uid,
     email: user.email,
     status: payload.status || "going",
@@ -578,13 +644,14 @@ async function rsvpEvent(eventId, payload = {}) {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   }, { merge: true });
-  await setDoc(doc(db, "users", user.uid, "rsvps", eventId), {
+  batch.set(doc(db, "users", user.uid, "rsvps", eventId), {
     eventId,
     title: payload.title || "",
     status: payload.status || "going",
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   }, { merge: true });
+  await batch.commit();
 }
 
 async function applyToProject(projectId, payload = {}) {
@@ -599,25 +666,29 @@ async function applyToProject(projectId, payload = {}) {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
-  await setDoc(doc(db, "projects", projectId, "applications", user.uid), application);
-  await setDoc(doc(db, "users", user.uid, "applications", projectId), {
+  const batch = writeBatch(db);
+  batch.set(doc(db, "projects", projectId, "applications", user.uid), application);
+  batch.set(doc(db, "users", user.uid, "applications", projectId), {
     projectId,
     title: payload.title || "",
     status: "pending",
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
+  await batch.commit();
 }
 
 async function updateProjectApplicationStatus(projectId, userId, status) {
-  await updateDoc(doc(db, "projects", projectId, "applications", userId), {
+  const batch = writeBatch(db);
+  batch.update(doc(db, "projects", projectId, "applications", userId), {
     status,
     updatedAt: serverTimestamp(),
   });
-  await updateDoc(doc(db, "users", userId, "applications", projectId), {
+  batch.update(doc(db, "users", userId, "applications", projectId), {
     status,
     updatedAt: serverTimestamp(),
-  }).catch(() => null);
+  });
+  await batch.commit();
   await logAudit("project-application-status", "projects", projectId, status);
 }
 
@@ -677,5 +748,8 @@ window.RVUFirebase = {
   updateUserRole,
   removeClubCoreRole,
   signInWithGoogle,
-  signOut: () => signOut(auth),
+  signOut: () => {
+    _cachedSuperAdminResult = null;
+    return signOut(auth);
+  },
 };

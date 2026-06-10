@@ -1,4 +1,104 @@
+
+async function promptUser(message, defaultValue = "") {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    Object.assign(overlay.style, {
+      position: "fixed", top: "0", left: "0", width: "100%", height: "100%",
+      backgroundColor: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center",
+      justifyContent: "center", zIndex: "10000"
+    });
+
+    const modal = document.createElement("div");
+    Object.assign(modal.style, {
+      backgroundColor: "#fff", padding: "24px", borderRadius: "8px", width: "300px",
+      maxWidth: "90%", boxShadow: "0 4px 12px rgba(0,0,0,0.15)", fontFamily: "inherit"
+    });
+
+    const label = document.createElement("p");
+    label.innerText = message;
+    Object.assign(label.style, {
+      marginTop: "0", marginBottom: "16px", fontWeight: "600", color: "#1d1a16", fontSize: "14px"
+    });
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.value = defaultValue;
+    Object.assign(input.style, {
+      width: "100%", padding: "8px", border: "1px solid #ccc", borderRadius: "4px",
+      boxSizing: "border-box", marginBottom: "24px", fontSize: "14px"
+    });
+
+    const btnContainer = document.createElement("div");
+    Object.assign(btnContainer.style, {
+      display: "flex", justifyContent: "flex-end", gap: "12px"
+    });
+
+    const cancelBtn = document.createElement("button");
+    cancelBtn.innerText = "Cancel";
+    Object.assign(cancelBtn.style, {
+      padding: "8px 16px", border: "1px solid #ccc", backgroundColor: "transparent",
+      borderRadius: "4px", cursor: "pointer", fontSize: "13px"
+    });
+
+    const okBtn = document.createElement("button");
+    okBtn.innerText = "OK";
+    Object.assign(okBtn.style, {
+      padding: "8px 16px", border: "none", backgroundColor: "#d4af37",
+      color: "#1d1a16", borderRadius: "4px", fontWeight: "600", cursor: "pointer", fontSize: "13px"
+    });
+
+    btnContainer.append(cancelBtn, okBtn);
+    modal.append(label, input, btnContainer);
+    overlay.append(modal);
+    document.body.append(overlay);
+    input.focus();
+
+    const cleanup = () => document.body.removeChild(overlay);
+    cancelBtn.onclick = () => { cleanup(); resolve(null); };
+    okBtn.onclick = () => { cleanup(); resolve(input.value); };
+    input.onkeydown = (e) => {
+      if (e.key === "Enter") okBtn.onclick();
+      if (e.key === "Escape") cancelBtn.onclick();
+    };
+  });
+}
+
 import { applyDemoCampusData } from "./sample-data.js";
+
+window.alert = function(message) {
+  const overlay = document.createElement("div");
+  Object.assign(overlay.style, {
+    position: "fixed", top: "0", left: "0", width: "100%", height: "100%",
+    backgroundColor: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center",
+    justifyContent: "center", zIndex: "10000"
+  });
+  const modal = document.createElement("div");
+  Object.assign(modal.style, {
+    backgroundColor: "#fff", padding: "24px", borderRadius: "8px", width: "300px",
+    maxWidth: "90%", boxShadow: "0 4px 12px rgba(0,0,0,0.15)", fontFamily: "inherit"
+  });
+  const label = document.createElement("p");
+  label.innerText = message;
+  Object.assign(label.style, {
+    marginTop: "0", marginBottom: "24px", fontWeight: "600", color: "#1d1a16", fontSize: "14px"
+  });
+  const btnContainer = document.createElement("div");
+  Object.assign(btnContainer.style, { display: "flex", justifyContent: "flex-end" });
+  const okBtn = document.createElement("button");
+  okBtn.innerText = "OK";
+  Object.assign(okBtn.style, {
+    padding: "8px 16px", border: "none", backgroundColor: "#d4af37",
+    color: "#1d1a16", borderRadius: "4px", fontWeight: "600", cursor: "pointer", fontSize: "13px"
+  });
+  btnContainer.appendChild(okBtn);
+  modal.append(label, btnContainer);
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+  okBtn.focus();
+  const cleanup = () => { if (document.body.contains(overlay)) document.body.removeChild(overlay); };
+  okBtn.onclick = cleanup;
+  okBtn.onkeydown = (e) => { if (e.key === "Enter" || e.key === "Escape") cleanup(); };
+};
 
 const icons = {
   home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 10.5 9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></svg>',
@@ -47,7 +147,7 @@ const state = {
   selectedProjectId: null,
   searchOpen: false,
   searchQuery: "",
-  route: "home",
+  route: new URLSearchParams(window.location.search).get("route") || "home",
   authed: false,
   isDemoMode: false,
   dataLoaded: false,
@@ -194,13 +294,25 @@ function isAllowedRvuEmail(email) {
 }
 
 function render() {
-  app.innerHTML = state.authed ? renderAppShell() : renderLanding();
-  bindEvents();
+  try {
+    app.innerHTML = state.authed ? renderAppShell() : renderLanding();
+    bindEvents();
+  } catch (err) {
+    console.error("Render Error:", err);
+    app.innerHTML = `<div style="padding:40px; text-align:center;">
+      <h2 style="color:#d93025; font-family:inherit;">Something went wrong</h2>
+      <p style="color:#666; font-family:inherit;">${err.message}</p>
+      <button onclick="window.location.reload()" style="padding:10px 20px; background:#d4af37; border:none; border-radius:4px; margin-top:20px; cursor:pointer; color:#1d1a16; font-weight:600;">Reload App</button>
+    </div>`;
+  }
 }
 
 function renderAtTop() {
   render();
   window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+  if (window.history.state?.route !== state.route) {
+    window.history.pushState({ route: state.route }, "", `?route=${state.route}`);
+  }
 }
 
 async function syncFirebaseData() {
@@ -232,7 +344,7 @@ async function syncFirebaseData() {
   } else if (!state.onboardingStep) {
     state.onboardingStep = "role";
   }
-  const data = applyDemoCampusData(await window.RVUFirebase.loadCampusData({ superAdmin: state.role === "admin" }));
+  const data = await window.RVUFirebase.loadCampusData({ superAdmin: state.role === "admin", profile });
   replaceCollection(clubs, data.clubs);
   replaceCollection(events, data.events.map(normalizeEvent));
   replaceCollection(announcements, data.announcements);
@@ -863,10 +975,22 @@ function renderRoute() {
 function renderLoadingState() {
   return `
     <section class="page-head">
-      ${sectionLabel("00", "Firebase")}
-      <h1>Loading campus data</h1>
-      <p>RVU Connect is syncing your profile, events, clubs, announcements, and project data from Firestore.</p>
+      ${sectionLabel("00", "Loading")}
+      <div style="height:32px; width:250px; background:#e8e0d4; border-radius:4px; margin: 16px 0; animation: pulse 1.5s infinite;"></div>
+      <div style="height:20px; width:80%; background:#e8e0d4; border-radius:4px; animation: pulse 1.5s infinite;"></div>
     </section>
+    <div style="display: flex; flex-direction: column; gap: 20px; padding: 20px;">
+      <div style="height:150px; width:100%; background:#e8e0d4; border-radius:8px; animation: pulse 1.5s infinite;"></div>
+      <div style="height:150px; width:100%; background:#e8e0d4; border-radius:8px; animation: pulse 1.5s infinite;"></div>
+      <div style="height:150px; width:100%; background:#e8e0d4; border-radius:8px; animation: pulse 1.5s infinite;"></div>
+    </div>
+    <style>
+      @keyframes pulse {
+        0% { opacity: 0.6; }
+        50% { opacity: 0.3; }
+        100% { opacity: 0.6; }
+      }
+    </style>
   `;
 }
 
@@ -2534,9 +2658,18 @@ function bindEvents() {
     button.addEventListener("click", (event) => {
       if (button.dataset.action === "search-input") return;
       event.stopPropagation();
-      handleAction(button.dataset.action, button.dataset).catch((error) => {
-        window.alert(error.message || "Action failed.");
-      });
+      const origPointer = button.style.pointerEvents;
+      const origOpacity = button.style.opacity;
+      button.style.pointerEvents = "none";
+      button.style.opacity = "0.5";
+      handleAction(button.dataset.action, button.dataset)
+        .catch((error) => {
+          window.alert(error.message || "Action failed.");
+        })
+        .finally(() => {
+          button.style.pointerEvents = origPointer;
+          button.style.opacity = origOpacity;
+        });
     });
   });
 
@@ -2659,13 +2792,13 @@ function bindEvents() {
 }
 
 async function updateClubLeadershipFromPrompt(clubId, club = {}) {
-  const currentPresidentName = window.prompt("Current president name", club.currentPresidentName || "");
+  const currentPresidentName = await promptUser("Current president name", club.currentPresidentName || "");
   if (currentPresidentName == null) return;
-  const currentPresidentEmail = window.prompt("Current president RVU email (@rvu.edu.in)", club.currentPresidentEmail || "");
+  const currentPresidentEmail = await promptUser("Current president RVU email (@rvu.edu.in)", club.currentPresidentEmail || "");
   if (!isAllowedRvuEmail(currentPresidentEmail)) return window.alert("Current president email must end with @rvu.edu.in.");
-  const facultyAdvisorName = window.prompt("Faculty advisor name", club.facultyAdvisorName || "");
+  const facultyAdvisorName = await promptUser("Faculty advisor name", club.facultyAdvisorName || "");
   if (facultyAdvisorName == null) return;
-  const facultyAdvisorEmail = window.prompt("Faculty advisor RVU email (@rvu.edu.in)", club.facultyAdvisorEmail || "");
+  const facultyAdvisorEmail = await promptUser("Faculty advisor RVU email (@rvu.edu.in)", club.facultyAdvisorEmail || "");
   if (!isAllowedRvuEmail(facultyAdvisorEmail)) return window.alert("Faculty advisor email must end with @rvu.edu.in.");
 
   await window.RVUFirebase.updateClubLeadership(clubId, {
@@ -2802,10 +2935,19 @@ async function handleAction(action, dataset) {
   if (action === "toggle-registration") {
     const club = clubs.find((item) => item.slug === dataset.club);
     if (club) {
-      const nextValue = !club.registrationOpen;
-      if (window.RVUFirebase) await window.RVUFirebase.updateClubRegistration(club.id || club.slug, nextValue);
+      const originalValue = club.registrationOpen;
+      const nextValue = !originalValue;
       club.registrationOpen = nextValue;
+      render();
+      try {
+        if (window.RVUFirebase) await window.RVUFirebase.updateClubRegistration(club.id || club.slug, nextValue);
+      } catch (error) {
+        club.registrationOpen = originalValue;
+        render();
+        throw error;
+      }
     }
+    return;
   }
   if (action === "approve-host") {
     if (window.RVUFirebase && dataset.request) {
@@ -2873,11 +3015,11 @@ async function handleAction(action, dataset) {
   }
   if (action === "admin-create-school") {
     if (!window.RVUFirebase || !isSuperAdmin()) return;
-    const name = window.prompt("School name");
+    const name = await promptUser("School name");
     if (!name) return;
-    const shortName = window.prompt("Short name (optional)") || "";
-    const description = window.prompt("Description") || "";
-    const leadEmail = window.prompt("Lead/admin RVU email optional (@rvu.edu.in)") || "";
+    const shortName = await promptUser("Short name (optional)") || "";
+    const description = await promptUser("Description") || "";
+    const leadEmail = await promptUser("Lead/admin RVU email optional (@rvu.edu.in)") || "";
     if (leadEmail && !isAllowedRvuEmail(leadEmail)) return window.alert("Lead email must end with @rvu.edu.in.");
     await window.RVUFirebase.createSchool({
       name,
@@ -2895,10 +3037,10 @@ async function handleAction(action, dataset) {
   }
   if (action === "admin-assign-core") {
     if (!window.RVUFirebase || !isSuperAdmin() || !dataset.docid) return;
-    const email = window.prompt("Core member RVU email (@rvu.edu.in)");
+    const email = await promptUser("Core member RVU email (@rvu.edu.in)");
     if (!isAllowedRvuEmail(email)) return window.alert("Core email must end with @rvu.edu.in.");
-    const name = window.prompt("Core member name") || email;
-    const role = window.prompt("Core role (e.g. designLead, eventsLead, treasurer)") || "core";
+    const name = await promptUser("Core member name") || email;
+    const role = await promptUser("Core role (e.g. designLead, eventsLead, treasurer)") || "core";
     await window.RVUFirebase.assignClubCoreRole(dataset.docid, { email, name, role });
     await syncFirebaseData();
   }
@@ -2914,16 +3056,16 @@ async function handleAction(action, dataset) {
   }
   if (action === "club-assign-core") {
     if (!window.RVUFirebase || !dataset.docid) return;
-    const email = window.prompt("Core member RVU email (@rvu.edu.in)");
+    const email = await promptUser("Core member RVU email (@rvu.edu.in)");
     if (!isAllowedRvuEmail(email)) return window.alert("Core email must end with @rvu.edu.in.");
-    const name = window.prompt("Core member name") || email;
-    const role = window.prompt("Core role (e.g. eventsLead, designLead, treasurer)") || "core";
+    const name = await promptUser("Core member name") || email;
+    const role = await promptUser("Core role (e.g. eventsLead, designLead, treasurer)") || "core";
     await window.RVUFirebase.assignClubCoreRole(dataset.docid, { email, name, role });
     await syncFirebaseData();
   }
   if (action === "admin-remove-core") {
     if (!window.RVUFirebase || !isSuperAdmin() || !dataset.docid) return;
-    const email = window.prompt("Core member email to remove");
+    const email = await promptUser("Core member email to remove");
     if (!email) return;
     if (!window.confirm(`Remove ${email} from this club core?`)) return;
     await window.RVUFirebase.removeClubCoreRole(dataset.docid, email);
@@ -2931,7 +3073,7 @@ async function handleAction(action, dataset) {
   }
   if (action === "club-remove-core") {
     if (!window.RVUFirebase || !dataset.docid) return;
-    const email = window.prompt("Core member email to remove");
+    const email = await promptUser("Core member email to remove");
     if (!email) return;
     if (!window.confirm(`Remove ${email} from this club core?`)) return;
     await window.RVUFirebase.removeClubCoreRole(dataset.docid, email);
@@ -2945,13 +3087,13 @@ async function handleAction(action, dataset) {
   }
   if (action === "admin-create-event") {
     if (!window.RVUFirebase || !isSuperAdmin()) return;
-    const title = window.prompt("Event title");
+    const title = await promptUser("Event title");
     if (!title) return;
-    const description = window.prompt("Description") || "";
-    const date = window.prompt("Display date") || "";
-    const time = window.prompt("Time") || "";
-    const location = window.prompt("Location") || "";
-    const host = window.prompt("Host/source") || "RVU";
+    const description = await promptUser("Description") || "";
+    const date = await promptUser("Display date") || "";
+    const time = await promptUser("Time") || "";
+    const location = await promptUser("Location") || "";
+    const host = await promptUser("Host/source") || "RVU";
     await window.RVUFirebase.createEvent({
       title,
       description,
@@ -2959,7 +3101,7 @@ async function handleAction(action, dataset) {
       time,
       location,
       host,
-      type: window.prompt("Type: Club Event, Faculty Event, School Event") || "School Event",
+      type: await promptUser("Type: Club Event, Faculty Event, School Event") || "School Event",
       hostType: "admin",
       tags: [],
       status: "published",
@@ -2968,13 +3110,13 @@ async function handleAction(action, dataset) {
   }
   if (action === "admin-create-announcement") {
     if (!window.RVUFirebase || !isSuperAdmin()) return;
-    const title = window.prompt("Announcement title");
+    const title = await promptUser("Announcement title");
     if (!title) return;
     await window.RVUFirebase.createAnnouncement({
       title,
-      description: window.prompt("Description") || "",
-      source: window.prompt("Source") || "RVU",
-      tag: window.prompt("Tag") || "Notice",
+      description: await promptUser("Description") || "",
+      source: await promptUser("Source") || "RVU",
+      tag: await promptUser("Tag") || "Notice",
       type: "Faculty",
       sourceType: "admin",
       time: "Just now",
@@ -3343,47 +3485,52 @@ async function handleAction(action, dataset) {
   }
   if (action === "save-item") {
     if (!window.RVUFirebase || !dataset.docid) return;
-    await window.RVUFirebase.saveItem({
-      itemId: dataset.docid,
-      type: dataset.kind || "item",
-      title: dataset.title || "",
-    });
-    await syncFirebaseData();
+    const itemData = { itemId: dataset.docid, type: dataset.kind || "item", title: dataset.title || "", id: dataset.docid };
+    state.savedItems = [...(state.savedItems || []), itemData];
+    render();
+    await window.RVUFirebase.saveItem(itemData);
     window.alert("Saved to your campus dashboard.");
+    return;
   }
   if (action === "follow-club") {
     if (!window.RVUFirebase || !dataset.docid) return;
+    state.followedClubs = [...(state.followedClubs || []), { clubId: dataset.docid, title: dataset.title || "", id: dataset.docid }];
+    render();
     await window.RVUFirebase.followClub(dataset.docid, dataset.title || "");
-    await syncFirebaseData();
     window.alert("Club followed.");
+    return;
   }
   if (action === "unfollow-club") {
     if (!window.RVUFirebase || !dataset.docid) return;
+    state.followedClubs = (state.followedClubs || []).filter(c => c.clubId !== dataset.docid && c.id !== dataset.docid);
+    render();
     await window.RVUFirebase.unfollowClub(dataset.docid);
-    await syncFirebaseData();
-    renderAtTop();
     return;
   }
   if (action === "rsvp-event") {
     if (!window.RVUFirebase || !dataset.docid) return;
+    state.rsvps = [...(state.rsvps || []), { eventId: dataset.docid, title: dataset.title || "", status: "going", id: dataset.docid }];
+    render();
     await window.RVUFirebase.rsvpEvent(dataset.docid, { title: dataset.title || "", status: "going" });
-    await syncFirebaseData();
     window.alert("RSVP saved.");
+    return;
   }
   if (action === "apply-project") {
     if (!window.RVUFirebase || !dataset.docid) return;
-    const note = window.prompt("Short application note optional") || "";
+    const note = await promptUser("Short application note optional") || "";
+    state.myApplications = [...(state.myApplications || []), { projectId: dataset.docid, title: dataset.title || "", status: "pending", id: dataset.docid }];
+    render();
     await window.RVUFirebase.applyToProject(dataset.docid, {
       title: dataset.title || "",
       name: state.user.name || state.authUser?.displayName || "",
       note,
     });
-    await syncFirebaseData();
     window.alert("Application submitted.");
+    return;
   }
   if (action === "flag-content") {
     if (!window.RVUFirebase || !dataset.docid) return;
-    const reason = window.prompt("Why are you reporting this?");
+    const reason = await promptUser("Why are you reporting this?");
     if (!reason) return;
     await window.RVUFirebase.flagContent({
       collection: dataset.kind || "content",
@@ -3464,4 +3611,34 @@ async function handleAction(action, dataset) {
   renderAtTop();
 }
 
-render();
+window.addEventListener("rvu-auth-user", (event) => {
+  if (event.detail) {
+    enterAuthenticatedApp(event.detail);
+  } else {
+    state.authed = false;
+    state.authUser = null;
+    state.role = "student";
+    state.dataLoading = false;
+    render();
+  }
+});
+
+window.addEventListener("rvu-auth-error", (event) => {
+  if (event.detail) window.alert(event.detail);
+});
+
+if (window.RVUFirebase?.auth?.currentUser) {
+  enterAuthenticatedApp(window.RVUFirebase.auth.currentUser);
+} else {
+  state.dataLoading = false;
+  render();
+}
+
+window.addEventListener("popstate", (event) => {
+  if (event.state && event.state.route) {
+    state.route = event.state.route;
+  } else {
+    state.route = new URLSearchParams(window.location.search).get("route") || "home";
+  }
+  renderAtTop();
+});
