@@ -110,6 +110,8 @@ const state = {
     review: defaultReview(),
   },
   toast: "",
+  auditLastDocId: null,
+  auditSearch: "",
 };
 
 const app = document.querySelector("#admin-app");
@@ -195,8 +197,32 @@ function showToast(message) {
   }, 2800);
 }
 
+function downloadCSV(filename, rows) {
+  if (!rows || !rows.length) return window.alert("No data to export.");
+  const keys = Object.keys(rows[0]).filter(k => typeof rows[0][k] !== 'object');
+  const csvContent = [
+    keys.join(","),
+    ...rows.map(row => keys.map(k => {
+      let val = row[k] === null || row[k] === undefined ? "" : String(row[k]);
+      val = val.replace(/"/g, '""');
+      return `"${val}"`;
+    }).join(","))
+  ].join("\n");
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.setAttribute("href", url);
+  link.setAttribute("download", filename);
+  link.style.visibility = 'hidden';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
 async function loadAdminData() {
   const data = applyDemoCampusData(await window.RVUFirebase.loadCampusData({ superAdmin: true }));
+  const auditRes = await window.RVUFirebase.loadAuditLogs();
+  state.auditLastDocId = auditRes.lastDocId;
   state.data = {
     hostRequests: data.hostRequests || [],
     moderationFlags: data.moderationFlags || [],
@@ -205,7 +231,7 @@ async function loadAdminData() {
     allAnnouncements: data.allAnnouncements || [],
     allClubs: data.allClubs || [],
     allSchools: data.allSchools || [],
-    auditLogs: data.auditLogs || [],
+    auditLogs: auditRes.docs || [],
     contentReviews: data.contentReviews || [],
     siteSettings: data.siteSettings || [],
     projects: data.projects || [],
@@ -608,6 +634,7 @@ function eventRow(event) {
   const label = event.status === "published" ? "Unpublish" : "Publish";
   return row(event.title, `${event.host || event.club || "RVU"} · ${event.date || "No date"} · ${event.status || "unknown"}`, `
     <button class="mini-btn" data-action="${action}" data-id="${event.id}">${label}</button>
+    <button class="mini-btn" data-action="export-rsvps" data-id="${event.id}">Export RSVPs</button>
     <button class="mini-btn danger" data-action="delete-event" data-id="${event.id}">Delete</button>
   `);
 }
@@ -674,6 +701,7 @@ function renderProjects() {
 function projectRow(project) {
   return row(project.title, `${(project.tags || []).join(", ") || "No tags"} · ${project.status || "open"}`, `
     <button class="mini-btn" data-action="project-application-status" data-id="${project.id}">Application status</button>
+    <button class="mini-btn" data-action="export-project-applicants" data-id="${project.id}">Export Applicants</button>
     <button class="mini-btn danger" data-action="delete-project" data-id="${project.id}">Delete</button>
   `);
 }
@@ -681,11 +709,21 @@ function projectRow(project) {
 function renderUsers() {
   return `
     <article class="panel wide">
-      <p class="eyebrow">Directory</p>
-      <h3>Users</h3>
-      ${listRows(state.data.allUsers, (user) => simpleRow(user.name || user.email || user.id, `${user.email || "No email"} · ${user.role || "student"} · ${user.school || "No school"}`), "No users yet.")}
+      <div style="display: flex; justify-content: space-between; align-items: baseline;">
+        <div><p class="eyebrow">Directory</p><h3>Users</h3></div>
+        <button class="btn gold" data-action="export-users">Download CSV</button>
+      </div>
+      ${listRows(state.data.allUsers, userRow, "No users yet.")}
     </article>
   `;
+}
+
+function userRow(user) {
+  const suspendedTxt = user.suspended ? " · [SUSPENDED]" : "";
+  const toggleLabel = user.suspended ? "Unsuspend" : "Suspend";
+  return row(user.name || user.email || user.id, `${user.email || "No email"} · ${user.role || "student"} · ${user.school || "No school"}${suspendedTxt}`, `
+    <button class="mini-btn ${user.suspended ? "" : "danger"}" data-action="toggle-suspend-user" data-id="${user.id}" data-suspended="${user.suspended ? 'true' : 'false'}">${toggleLabel}</button>
+  `);
 }
 
 function renderReview() {
@@ -779,11 +817,23 @@ function analyticsCard(title, value, copy) {
 }
 
 function renderAudit() {
+  const filteredLogs = state.data.auditLogs.filter(item => {
+    if (!state.auditSearch) return true;
+    const s = state.auditSearch.toLowerCase();
+    return (item.action || "").toLowerCase().includes(s) || (item.adminEmail || item.actorEmail || "").toLowerCase().includes(s);
+  });
   return `
     <article class="panel wide">
       <p class="eyebrow">Immutable activity</p>
-      <h3>Audit log</h3>
-      ${listRows(state.data.auditLogs.slice().reverse().slice(0, 80), (item) => simpleRow(item.action || "Action", `${item.collection || "collection"} · ${item.title || item.targetId || ""} · ${item.adminEmail || ""}`), "No audit entries yet.")}
+      <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 16px;">
+        <h3>Audit log</h3>
+        <div style="display: flex; gap: 8px;">
+          <input type="text" data-field="auditSearch" value="${escapeHtml(state.auditSearch || "")}" placeholder="Search action or email..." style="padding: 6px; border: 1px solid #ccc; border-radius: 4px;" />
+          <button class="btn secondary" data-action="search-audit">Search</button>
+        </div>
+      </div>
+      ${listRows(filteredLogs, (item) => simpleRow(item.action || "Action", `${item.collection || "collection"} · ${item.title || item.targetId || ""} · ${item.adminEmail || item.actorEmail || ""}`), "No audit entries match.")}
+      ${state.auditLastDocId ? `<div style="margin-top: 16px; text-align: center;"><button class="btn secondary" data-action="load-more-audit">Load More</button></div>` : ""}
     </article>
   `;
 }
@@ -832,6 +882,7 @@ function setByPath(path, value) {
   if (group && key && state.forms[group]) state.forms[group][key] = value;
   if (path === "authEmail") state.authEmail = value;
   if (path === "authPassword") state.authPassword = value;
+  if (path === "auditSearch") state.auditSearch = value;
 }
 
 function getClubValidationError() {
@@ -1078,6 +1129,43 @@ async function handleAction(action, id) {
     await window.RVUFirebase.updateProjectApplicationStatus(id, userId, status);
     await refresh();
     showToast("Project application updated.");
+  }
+  if (action === "export-users") {
+    downloadCSV("rvuconnect_users.csv", state.data.allUsers);
+    return;
+  }
+  if (action === "toggle-suspend-user") {
+    const user = state.data.allUsers.find(u => u.id === id);
+    if (!user) return;
+    const newStatus = !user.suspended;
+    if (!window.confirm(`${newStatus ? 'Suspend' : 'Unsuspend'} ${user.email || user.name}?`)) return;
+    await window.RVUFirebase.toggleUserSuspension(id, newStatus);
+    await refresh();
+    showToast(`User ${newStatus ? 'suspended' : 'unsuspended'}.`);
+    return;
+  }
+  if (action === "export-rsvps") {
+    const rsvps = await window.RVUFirebase.getEventRSVPs(id);
+    downloadCSV(`event_${id}_rsvps.csv`, rsvps);
+    return;
+  }
+  if (action === "export-project-applicants") {
+    const apps = await window.RVUFirebase.getProjectApplicants(id);
+    downloadCSV(`project_${id}_applicants.csv`, apps);
+    return;
+  }
+  if (action === "load-more-audit") {
+    const res = await window.RVUFirebase.loadAuditLogs(state.auditLastDocId);
+    state.data.auditLogs.push(...res.docs);
+    state.auditLastDocId = res.lastDocId;
+    render();
+    return;
+  }
+  if (action === "search-audit") {
+    const searchEl = document.querySelector('[data-field="auditSearch"]');
+    state.auditSearch = searchEl ? searchEl.value.trim() : "";
+    render();
+    return;
   }
 }
 

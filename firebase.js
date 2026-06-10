@@ -25,6 +25,8 @@ import {
   updateDoc,
   where,
   limit,
+  orderBy,
+  startAfter,
   writeBatch,
 } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 
@@ -127,7 +129,7 @@ async function ensureUserProfile(user) {
   }
 
   const clubsSnap = await getDocs(query(collection(db, "clubs"), where("status", "==", "approved")));
-  let assignedClubId = null;
+  let assignedClubIds = [];
   let assignedRoleTitle = "Core Member";
   const email = user.email.toLowerCase();
 
@@ -137,20 +139,19 @@ async function ensureUserProfile(user) {
       return null;
     });
     if (memberSnap?.exists() && memberSnap.data().status === "approved") {
-      assignedClubId = docSnap.id;
-      assignedRoleTitle = memberSnap.data().role || "Core Member";
-      break;
+      assignedClubIds.push(docSnap.id);
+      assignedRoleTitle = memberSnap.data().role || assignedRoleTitle;
     }
   }
 
   const profile = {
     email: user.email,
     name: user.displayName || user.email.split("@")[0],
-    role: superAdmin ? "superAdmin" : (assignedClubId ? "clubCore" : "student"),
-    clubId: assignedClubId,
+    role: superAdmin ? "superAdmin" : (assignedClubIds.length > 0 ? "clubCore" : "student"),
+    clubIds: assignedClubIds,
     roleTitle: assignedRoleTitle,
     interests: [],
-    onboardingComplete: superAdmin || !!assignedClubId,
+    onboardingComplete: superAdmin || assignedClubIds.length > 0,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
@@ -206,8 +207,9 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
       rowsOrEmpty("project applications", getDocs(collection(db, "users", uid, "applications"))),
     ]);
     let memberDocs = [];
-    if (profile.clubId) {
-      const club = data.clubs.find(c => c.id === profile.clubId || c.slug === profile.clubId);
+    const userClubIds = profile.clubIds || (profile.clubId ? [profile.clubId] : []);
+    for (const cId of userClubIds) {
+      const club = data.clubs.find(c => c.id === cId || c.slug === cId);
       if (club) {
         const memberSnap = await getDoc(doc(db, "clubs", club.id, "coreMembers", email));
         if (memberSnap.exists() && memberSnap.data().status === "approved") {
@@ -215,6 +217,7 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
         }
       }
     }
+    data.clubAccesses = memberDocs;
     data.clubAccess = memberDocs.find((entry) => entry?.member?.status === "approved") || null;
     data.savedItems = savedRows;
     data.followedClubs = followRows;
@@ -223,7 +226,7 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
   }
 
   if (superAdmin) {
-    const [requestsRows, flagsRows, userRows, allEventRows, allAnnouncementRows, allClubRows, allSchoolRows, auditRows, reviewRows] = await Promise.all([
+    const [requestsRows, flagsRows, userRows, allEventRows, allAnnouncementRows, allClubRows, allSchoolRows, reviewRows] = await Promise.all([
       rowsOrEmpty("host requests", getDocs(query(collection(db, "hostRequests"), limit(100)))),
       rowsOrEmpty("moderation flags", getDocs(query(collection(db, "moderationFlags"), limit(100)))),
       rowsOrEmpty("users", getDocs(query(collection(db, "users"), limit(100)))),
@@ -231,7 +234,6 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
       rowsOrEmpty("all announcements", getDocs(query(collection(db, "announcements"), limit(100)))),
       rowsOrEmpty("all clubs", getDocs(query(collection(db, "clubs"), limit(100)))),
       rowsOrEmpty("all schools", getDocs(query(collection(db, "schools"), limit(100)))),
-      rowsOrEmpty("audit logs", getDocs(query(collection(db, "auditLogs"), limit(100)))),
       rowsOrEmpty("content reviews", getDocs(query(collection(db, "contentReviews"), limit(100)))),
     ]);
     data.hostRequests = requestsRows;
@@ -241,7 +243,7 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
     data.allAnnouncements = allAnnouncementRows;
     data.allClubs = allClubRows;
     data.allSchools = allSchoolRows;
-    data.auditLogs = auditRows;
+    data.auditLogs = [];
     data.contentReviews = reviewRows;
   }
 
@@ -287,6 +289,67 @@ async function submitHostRequest(payload) {
   return ref.id;
 }
 
+// Submit core-member requests for one or more existing approved clubs.
+// Creates one hostRequest doc per club, and a pending coreMembers entry per club.
+async function submitMultiClubCoreRequest(clubIds, { name, roleTitle }) {
+  const user = auth.currentUser;
+  if (!user) throw new Error("Sign in before submitting a host request.");
+  if (!clubIds || clubIds.length === 0) throw new Error("Select at least one club.");
+
+  const results = [];
+  for (const clubId of clubIds) {
+    const memberName = name || user.displayName || user.email.split("@")[0];
+    const memberRole = roleTitle || "Core Member";
+    const request = {
+      type: "clubCore",
+      clubId,
+      uid: user.uid,
+      email: user.email,
+      name: memberName,
+      roleTitle: memberRole,
+      status: "pending",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+    const ref = await addDoc(collection(db, "hostRequests"), request);
+    await setDoc(doc(db, "clubs", clubId, "coreMembers", user.email.toLowerCase()), {
+      uid: user.uid,
+      email: user.email,
+      name: memberName,
+      role: memberRole,
+      status: "pending",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    results.push(ref.id);
+  }
+  return results;
+}
+
+// Submit a request to create a brand-new club. Goes to super admin for approval.
+async function submitNewClubCreationRequest(clubDraft) {
+  const user = auth.currentUser;
+  if (!user) throw new Error("Sign in before submitting a club creation request.");
+  const ref = await addDoc(collection(db, "hostRequests"), {
+    type: "newClub",
+    uid: user.uid,
+    email: user.email,
+    name: user.displayName || user.email.split("@")[0],
+    roleTitle: clubDraft.founderRole || "President",
+    clubName: clubDraft.name || "",
+    clubCategory: clubDraft.category || "",
+    clubSchool: clubDraft.school || "",
+    clubDescription: clubDraft.description || "",
+    clubTagline: clubDraft.tagline || "",
+    founderName: user.displayName || user.email.split("@")[0],
+    founderEmail: user.email,
+    status: "pending",
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  return ref.id;
+}
+
 async function updateClubRegistration(clubId, registrationOpen) {
   await updateDoc(doc(db, "clubs", clubId), {
     registrationOpen,
@@ -306,22 +369,82 @@ async function updateHostRequestStatus(requestId, status) {
     updatedAt: serverTimestamp(),
   });
 
+  if (request.type == "newClub" && status == "approved") {
+    // 1. Create the new club
+    const clubId = request.clubName.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    await setDoc(doc(db, "clubs", clubId), {
+      name: request.clubName,
+      slug: clubId,
+      category: request.clubCategory,
+      school: request.clubSchool,
+      description: request.clubDescription,
+      tagline: request.clubTagline,
+      founderName: request.founderName,
+      founderEmail: request.founderEmail,
+      status: "approved",
+      registrationOpen: false,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+
+    // 2. Add the founder to the coreMembers subcollection
+    await setDoc(doc(db, "clubs", clubId, "coreMembers", request.founderEmail.toLowerCase()), {
+      uid: request.uid,
+      email: request.email,
+      name: request.founderName,
+      role: request.roleTitle || "President",
+      status: "approved",
+      reviewedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+
+    // 3. Update the user profile
+    const userRef = doc(db, "users", request.uid);
+    const userSnap = await getDoc(userRef);
+    if (userSnap.exists()) {
+      const userData = userSnap.data();
+      const currentIds = userData.clubIds || [];
+      if (!currentIds.includes(clubId)) currentIds.push(clubId);
+      
+      await updateDoc(userRef, {
+        role: userData.role === "superAdmin" ? "superAdmin" : "clubCore",
+        clubIds: currentIds,
+        roleTitle: request.roleTitle || "President",
+        hostName: request.founderName || "",
+        hostApproved: true,
+        onboardingComplete: true,
+        updatedAt: serverTimestamp(),
+      });
+    }
+  }
+
   if (request.type == "clubCore" && request.clubId && request.uid) {
-    await updateDoc(doc(db, "clubs", request.clubId, "coreMembers", request.email), {
+    await updateDoc(doc(db, "clubs", request.clubId, "coreMembers", request.email.toLowerCase()), {
       uid: request.uid,
       status,
       reviewedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
-    await updateDoc(doc(db, "users", request.uid), {
-      role: status == "approved" ? "clubCore" : "student",
-      clubId: request.clubId,
-      roleTitle: request.roleTitle || "Core Member",
-      hostName: request.name || "",
-      hostApproved: status == "approved",
-      onboardingComplete: true,
-      updatedAt: serverTimestamp(),
-    });
+    
+    const userRef = doc(db, "users", request.uid);
+    const userSnap = await getDoc(userRef);
+    if (userSnap.exists()) {
+      const userData = userSnap.data();
+      const currentIds = userData.clubIds || [];
+      if (status == "approved" && !currentIds.includes(request.clubId)) {
+        currentIds.push(request.clubId);
+      }
+      
+      await updateDoc(userRef, {
+        role: userData.role === "superAdmin" ? "superAdmin" : (status == "approved" ? "clubCore" : userData.role),
+        clubIds: currentIds,
+        roleTitle: request.roleTitle || "Core Member",
+        hostName: request.name || "",
+        hostApproved: status == "approved" || currentIds.length > 0,
+        onboardingComplete: true,
+        updatedAt: serverTimestamp(),
+      });
+    }
   }
 
   if (request.type == "schoolRepresentative" && request.schoolId && request.uid) {
@@ -330,18 +453,23 @@ async function updateHostRequestStatus(requestId, status) {
       reviewedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
-    await updateDoc(doc(db, "users", request.uid), {
-      role: status == "approved" ? "schoolRepresentative" : "student",
-      schoolScope: request.schoolId,
-      roleTitle: request.roleTitle || "Representative",
-      hostName: request.name || "",
-      hostApproved: status == "approved",
-      onboardingComplete: true,
-      facultyDesignation: request.facultyDesignation || "",
-      facultyDepartment: request.facultyDepartment || "",
-      isFaculty: request.facultyDesignation !== "Student Rep",
-      updatedAt: serverTimestamp(),
-    });
+    const userRef = doc(db, "users", request.uid);
+    const userSnap = await getDoc(userRef);
+    if (userSnap.exists()) {
+      const userData = userSnap.data();
+      await updateDoc(userRef, {
+        role: userData.role === "superAdmin" ? "superAdmin" : (status == "approved" ? "schoolRepresentative" : userData.role),
+        schoolScope: request.schoolId,
+        roleTitle: request.roleTitle || "Representative",
+        hostName: request.name || "",
+        hostApproved: status == "approved",
+        onboardingComplete: true,
+        facultyDesignation: request.facultyDesignation || "",
+        facultyDepartment: request.facultyDepartment || "",
+        isFaculty: request.facultyDesignation !== "Student Rep",
+        updatedAt: serverTimestamp(),
+      });
+    }
   }
 }
 
@@ -706,6 +834,50 @@ async function flagContent(payload) {
   return ref.id;
 }
 
+async function toggleUserSuspension(uid, suspended) {
+  const batch = writeBatch(db);
+  batch.update(doc(db, "users", uid), {
+    suspended,
+    updatedAt: serverTimestamp(),
+  });
+  await batch.commit();
+  await logAudit("toggle-user-suspension", "users", uid, suspended ? "suspended" : "unsuspended");
+}
+
+async function getEventRSVPs(eventId) {
+  const snap = await getDocs(collection(db, "events", eventId, "rsvps"));
+  return rows(snap);
+}
+
+async function getProjectApplicants(projectId) {
+  const snap = await getDocs(collection(db, "projects", projectId, "applications"));
+  return rows(snap);
+}
+
+async function loadAuditLogs(lastDocId = null) {
+  let q = query(
+    collection(db, "auditLogs"),
+    orderBy("createdAt", "desc"),
+    limit(50)
+  );
+  if (lastDocId) {
+    const docSnap = await getDoc(doc(db, "auditLogs", lastDocId));
+    if (docSnap.exists()) {
+      q = query(
+        collection(db, "auditLogs"),
+        orderBy("createdAt", "desc"),
+        startAfter(docSnap),
+        limit(50)
+      );
+    }
+  }
+  const snap = await getDocs(q);
+  return { 
+    docs: rows(snap), 
+    lastDocId: snap.docs.length > 0 ? snap.docs[snap.docs.length - 1].id : null 
+  };
+}
+
 window.RVUFirebase = {
   app,
   auth,
@@ -733,6 +905,8 @@ window.RVUFirebase = {
   saveItem,
   signInWithEmailPassword,
   submitHostRequest,
+  submitMultiClubCoreRequest,
+  submitNewClubCreationRequest,
   unfollowClub,
   updateAnnouncementStatus,
   updateClub,
@@ -747,6 +921,10 @@ window.RVUFirebase = {
   updateSiteSetting,
   updateUserRole,
   removeClubCoreRole,
+  toggleUserSuspension,
+  getEventRSVPs,
+  getProjectApplicants,
+  loadAuditLogs,
   signInWithGoogle,
   signOut: () => {
     _cachedSuperAdminResult = null;

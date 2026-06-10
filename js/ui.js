@@ -1,299 +1,9 @@
+import { icon, multiSelectField, selectField, inputField, clubInputField, clubSelectField, clubTextArea, unique, escapeHtml } from './utils.js';
+import { schools, interests, events, clubs, announcements, projects, state, app } from './state.js';
+import { isClubCore, isSchoolRep, isSuperAdmin, canHost, roleLabel, activeClub } from './auth.js';
+import { bindEvents } from './main.js';
 
-async function promptUser(message, defaultValue = "") {
-  return new Promise((resolve) => {
-    const overlay = document.createElement("div");
-    Object.assign(overlay.style, {
-      position: "fixed", top: "0", left: "0", width: "100%", height: "100%",
-      backgroundColor: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center",
-      justifyContent: "center", zIndex: "10000"
-    });
-
-    const modal = document.createElement("div");
-    Object.assign(modal.style, {
-      backgroundColor: "#fff", padding: "24px", borderRadius: "8px", width: "300px",
-      maxWidth: "90%", boxShadow: "0 4px 12px rgba(0,0,0,0.15)", fontFamily: "inherit"
-    });
-
-    const label = document.createElement("p");
-    label.innerText = message;
-    Object.assign(label.style, {
-      marginTop: "0", marginBottom: "16px", fontWeight: "600", color: "#1d1a16", fontSize: "14px"
-    });
-
-    const input = document.createElement("input");
-    input.type = "text";
-    input.value = defaultValue;
-    Object.assign(input.style, {
-      width: "100%", padding: "8px", border: "1px solid #ccc", borderRadius: "4px",
-      boxSizing: "border-box", marginBottom: "24px", fontSize: "14px"
-    });
-
-    const btnContainer = document.createElement("div");
-    Object.assign(btnContainer.style, {
-      display: "flex", justifyContent: "flex-end", gap: "12px"
-    });
-
-    const cancelBtn = document.createElement("button");
-    cancelBtn.innerText = "Cancel";
-    Object.assign(cancelBtn.style, {
-      padding: "8px 16px", border: "1px solid #ccc", backgroundColor: "transparent",
-      borderRadius: "4px", cursor: "pointer", fontSize: "13px"
-    });
-
-    const okBtn = document.createElement("button");
-    okBtn.innerText = "OK";
-    Object.assign(okBtn.style, {
-      padding: "8px 16px", border: "none", backgroundColor: "#d4af37",
-      color: "#1d1a16", borderRadius: "4px", fontWeight: "600", cursor: "pointer", fontSize: "13px"
-    });
-
-    btnContainer.append(cancelBtn, okBtn);
-    modal.append(label, input, btnContainer);
-    overlay.append(modal);
-    document.body.append(overlay);
-    input.focus();
-
-    const cleanup = () => document.body.removeChild(overlay);
-    cancelBtn.onclick = () => { cleanup(); resolve(null); };
-    okBtn.onclick = () => { cleanup(); resolve(input.value); };
-    input.onkeydown = (e) => {
-      if (e.key === "Enter") okBtn.onclick();
-      if (e.key === "Escape") cancelBtn.onclick();
-    };
-  });
-}
-
-import { applyDemoCampusData } from "./sample-data.js";
-
-window.alert = function(message) {
-  const overlay = document.createElement("div");
-  Object.assign(overlay.style, {
-    position: "fixed", top: "0", left: "0", width: "100%", height: "100%",
-    backgroundColor: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center",
-    justifyContent: "center", zIndex: "10000"
-  });
-  const modal = document.createElement("div");
-  Object.assign(modal.style, {
-    backgroundColor: "#fff", padding: "24px", borderRadius: "8px", width: "300px",
-    maxWidth: "90%", boxShadow: "0 4px 12px rgba(0,0,0,0.15)", fontFamily: "inherit"
-  });
-  const label = document.createElement("p");
-  label.innerText = message;
-  Object.assign(label.style, {
-    marginTop: "0", marginBottom: "24px", fontWeight: "600", color: "#1d1a16", fontSize: "14px"
-  });
-  const btnContainer = document.createElement("div");
-  Object.assign(btnContainer.style, { display: "flex", justifyContent: "flex-end" });
-  const okBtn = document.createElement("button");
-  okBtn.innerText = "OK";
-  Object.assign(okBtn.style, {
-    padding: "8px 16px", border: "none", backgroundColor: "#d4af37",
-    color: "#1d1a16", borderRadius: "4px", fontWeight: "600", cursor: "pointer", fontSize: "13px"
-  });
-  btnContainer.appendChild(okBtn);
-  modal.append(label, btnContainer);
-  overlay.appendChild(modal);
-  document.body.appendChild(overlay);
-  okBtn.focus();
-  const cleanup = () => { if (document.body.contains(overlay)) document.body.removeChild(overlay); };
-  okBtn.onclick = cleanup;
-  okBtn.onkeydown = (e) => { if (e.key === "Enter" || e.key === "Escape") cleanup(); };
-};
-
-const icons = {
-  home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 10.5 9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></svg>',
-  calendar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 2v4M16 2v4M3 10h18"/><rect x="3" y="4" width="18" height="18" rx="2"/></svg>',
-  clubs: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
-  projects: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
-  announce: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 11 18-5v12L3 14v-3Z"/><path d="M11.6 16.8A3 3 0 0 1 6 15"/></svg>',
-  admin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6l-8-3Z"/><path d="M9 12l2 2 4-5"/></svg>',
-  plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>',
-  mail: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>',
-  bookmark: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21 12 17 5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2Z"/></svg>',
-  user: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>',
-  lightbulb: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 1 7 7c0 2.6-1.4 4.9-3.5 6.2-.5.3-.5.8-.5 1.3V17H9v-.5c0-.5 0-1-.5-1.3A7 7 0 0 1 5 9a7 7 0 0 1 7-7Z"/></svg>',
-};
-
-const schools = [
-  "School of Computer Science and Engineering",
-  "School of Law",
-  "School of Liberal Arts and Sciences",
-  "School of Economics and Public Policy",
-  "School of Continuing Education",
-  "School of Allied Healthcare",
-  "School of Film Media and Creative Arts",
-  "School of Design and Innovation",
-  "School of Business",
-];
-
-const interests = ["AI", "Web Development", "Design", "Business", "Finance", "Marketing", "Product", "Film", "Law", "Healthcare"];
-
-const events = [];
-const clubs = [];
-const announcements = [];
-const projects = [];
-
-const state = {
-  createProjectOpen: false,
-  createEventOpen: false,
-  editEventId: null,
-  editEventOpen: false,
-  createAnnouncementOpen: false,
-  editAnnouncementOpen: false,
-  editAnnouncementId: null,
-  editProfileOpen: false,
-  selectedEventId: null,
-  selectedAnnouncementId: null,
-  selectedProjectId: null,
-  searchOpen: false,
-  searchQuery: "",
-  route: new URLSearchParams(window.location.search).get("route") || "home",
-  authed: false,
-  isDemoMode: false,
-  dataLoaded: false,
-  dataLoading: false,
-  authUser: null,
-  loginOpen: false,
-  authMode: "signin",
-  authEmail: "",
-  authPassword: "",
-  hostRequests: [],
-  moderationFlags: [],
-  onboardingStep: "role",
-  role: null,
-  createOpen: false,
-  selectedClubSlug: null,
-  adminScope: "school",
-  adminTab: "requests",
-  clubDraft: {
-    name: "",
-    category: "",
-    school: schools[0],
-    tagline: "",
-    description: "",
-    founderName: "",
-    founderEmail: "",
-    facultyAdvisorName: "",
-    facultyAdvisorEmail: "",
-    currentPresidentName: "",
-    currentPresidentEmail: "",
-    joinLink: "",
-    registrationOpen: false,
-  },
-  user: {
-    name: "",
-    school: schools[0],
-    year: "1",
-    interests: [],
-  },
-  host: {
-    type: "Club Core",
-    clubSlug: "",
-    school: schools[0],
-    roleTitle: "Core Member",
-    name: "",
-    category: "",
-    description: "",
-    email: "",
-    joinLink: "",
-    approver: "Current president",
-    approvedBy: "Super Admin",
-    approved: false,
-    facultyDesignation: "",
-    facultyDepartment: "",
-    isFaculty: true,
-  },
-  filters: {
-    eventType: "All",
-    clubCategory: "All",
-    clubSchool: "All",
-    announcementType: "All",
-    projectTag: "All",
-  },
-  allUsers: [],
-  allEvents: [],
-  allAnnouncements: [],
-  allClubs: [],
-  allSchools: [],
-  savedItems: [],
-  followedClubs: [],
-  rsvps: [],
-  myApplications: [],
-  siteSettings: [],
-};
-
-const app = document.querySelector("#app");
-
-function defaultClubDraft() {
-  return {
-    name: "",
-    category: "",
-    school: schools[0],
-    tagline: "",
-    description: "",
-    founderName: "",
-    founderEmail: "",
-    facultyAdvisorName: "",
-    facultyAdvisorEmail: "",
-    currentPresidentName: "",
-    currentPresidentEmail: "",
-    joinLink: "",
-    registrationOpen: false,
-  };
-}
-
-function replaceCollection(target, values) {
-  target.splice(0, target.length, ...values);
-}
-
-function icon(name) {
-  return icons[name] || "";
-}
-
-function isClubCore() {
-  return state.role === "club-core";
-}
-
-function isSchoolRep() {
-  return state.role === "school-rep";
-}
-
-function isSuperAdmin() {
-  return state.role === "admin";
-}
-
-function canHost() {
-  return (isClubCore() || isSchoolRep()) && state.host.approved;
-}
-
-function roleLabel() {
-  if (isSuperAdmin()) return "Super admin";
-  if (isClubCore()) return state.host.approved ? "Club core" : "Club pending";
-  if (isSchoolRep()) return state.host.approved ? "School rep" : "School pending";
-  return "Student";
-}
-
-function activeClub() {
-  return clubs.find((item) => item.slug === state.host.clubSlug || item.id === state.host.clubSlug) || clubs[0] || {
-    id: "",
-    slug: "",
-    name: "No club selected",
-    category: "Club",
-    school: state.host.school,
-    tagline: "Create or approve clubs in Firestore to enable club controls.",
-    description: "No approved club records are available yet.",
-    doing: "Waiting for club data.",
-    highlights: [],
-    registrationOpen: false,
-    join: "",
-  };
-}
-
-function isAllowedRvuEmail(email) {
-  return typeof email === "string" && email.trim().toLowerCase().endsWith("@rvu.edu.in");
-}
-
-function render() {
+export function render() {
   try {
     app.innerHTML = state.authed ? renderAppShell() : renderLanding();
     bindEvents();
@@ -307,7 +17,7 @@ function render() {
   }
 }
 
-function renderAtTop() {
+export function renderAtTop() {
   render();
   window.scrollTo({ top: 0, left: 0, behavior: "instant" });
   if (window.history.state?.route !== state.route) {
@@ -315,186 +25,7 @@ function renderAtTop() {
   }
 }
 
-async function syncFirebaseData() {
-  if (!window.RVUFirebase || !state.authUser) return;
-  state.dataLoading = true;
-  render();
-  const profile = await window.RVUFirebase.ensureUserProfile(state.authUser);
-  const roleMap = {
-    superAdmin: "admin",
-    clubCore: "club-core",
-    schoolRepresentative: "school-rep",
-    student: "student",
-  };
-  state.role = roleMap[profile.role] || "student";
-  state.user.name = profile.name || state.authUser.displayName || state.user.name;
-  state.user.school = profile.school || state.user.school;
-  state.user.year = profile.year || state.user.year;
-  state.user.interests = profile.interests || state.user.interests;
-  if (profile.clubId) state.host.clubSlug = profile.clubId;
-  if (profile.schoolScope) state.host.school = profile.schoolScope;
-  if (profile.roleTitle) state.host.roleTitle = profile.roleTitle;
-  if (profile.hostName) state.host.name = profile.hostName;
-  if (profile.hostApproved !== undefined) state.host.approved = profile.hostApproved;
-  if (profile.facultyDesignation) state.host.facultyDesignation = profile.facultyDesignation;
-  if (profile.facultyDepartment) state.host.facultyDepartment = profile.facultyDepartment;
-  if (profile.isFaculty !== undefined) state.host.isFaculty = profile.isFaculty;
-  if (profile.role === "superAdmin" || profile.onboardingComplete) {
-    state.onboardingStep = null;
-  } else if (!state.onboardingStep) {
-    state.onboardingStep = "role";
-  }
-  const data = await window.RVUFirebase.loadCampusData({ superAdmin: state.role === "admin", profile });
-  replaceCollection(clubs, data.clubs);
-  replaceCollection(events, data.events.map(normalizeEvent));
-  replaceCollection(announcements, data.announcements);
-  replaceCollection(projects, data.projects);
-  state.hostRequests = data.hostRequests || [];
-  state.moderationFlags = data.moderationFlags || [];
-  state.allUsers = data.allUsers || [];
-  state.allEvents = data.allEvents || [];
-  state.allAnnouncements = data.allAnnouncements || [];
-  state.allClubs = data.allClubs || [];
-  state.allSchools = data.allSchools || [];
-  state.savedItems = data.savedItems || [];
-  state.followedClubs = data.followedClubs || [];
-  state.rsvps = data.rsvps || [];
-  state.myApplications = data.myApplications || [];
-  state.siteSettings = data.siteSettings || [];
-  if (profile.role !== "superAdmin" && data.clubAccess) {
-    state.role = "club-core";
-    state.host.clubSlug = data.clubAccess.club.id;
-    state.host.school = data.clubAccess.club.school || state.host.school;
-    state.host.roleTitle = data.clubAccess.member.role || "core";
-    state.host.name = data.clubAccess.member.name || data.clubAccess.club.name;
-    state.host.approved = true;
-    state.onboardingStep = null;
-  }
-  state.dataLoaded = true;
-  state.dataLoading = false;
-}
-
-function normalizeEvent(event) {
-  const eventDate = event.date || event.displayDate || "";
-  return {
-    colors: ["#233039", "#926d2f"],
-    tags: [],
-    sort: 999,
-    ...event,
-    date: eventDate,
-    past: event.past || false,
-  };
-}
-
-function hydrateCampusState(data) {
-  replaceCollection(clubs, data.clubs.map((club) => ({ slug: club.slug || club.id, ...club })));
-  replaceCollection(events, data.events.map(normalizeEvent));
-  replaceCollection(announcements, data.announcements);
-  replaceCollection(projects, data.projects);
-  state.hostRequests = data.hostRequests || [];
-  state.moderationFlags = data.moderationFlags || [];
-  state.allUsers = data.allUsers || [];
-  state.allEvents = data.allEvents || [];
-  state.allAnnouncements = data.allAnnouncements || [];
-  state.allClubs = data.allClubs || [];
-  state.allSchools = data.allSchools || [];
-  state.savedItems = data.savedItems || [];
-  state.followedClubs = data.followedClubs || [];
-  state.rsvps = data.rsvps || [];
-  state.myApplications = data.myApplications || [];
-  state.siteSettings = data.siteSettings || [];
-}
-
-async function enterAuthenticatedApp(user) {
-  if (!user) {
-    window.alert("Authentication required. Please sign in with your RVU email.");
-    return;
-  }
-  state.authed = true;
-  state.authUser = user;
-  if (user.displayName) state.user.name = user.displayName;
-  try {
-    await syncFirebaseData();
-    if (isSuperAdmin() && !window.location.pathname.endsWith("/admin.html")) {
-      window.location.href = "./admin.html";
-      return;
-    }
-  } catch (error) {
-    state.dataLoading = false;
-    window.alert(error.message || "Could not load Firebase data.");
-  }
-  renderAtTop();
-}
-
-function enterDemoApp() {
-  const data = applyDemoCampusData({});
-  hydrateCampusState(data);
-  state.authed = true;
-  state.isDemoMode = true;
-  state.authUser = null;
-  state.role = "student";
-  state.user = {
-    name: "Demo Student",
-    school: schools[0],
-    year: "2",
-    interests: ["AI", "Design", "Product", "Web Development"],
-  };
-  state.onboardingStep = null;
-  state.route = "home";
-  state.dataLoaded = true;
-  state.dataLoading = false;
-  renderAtTop();
-}
-
-async function handleSignOut() {
-  if (!window.RVUFirebase) return;
-  try {
-    await window.RVUFirebase.signOut();
-    state.authed = false;
-    state.authUser = null;
-    state.role = null;
-    state.dataLoaded = false;
-    state.onboardingStep = "role";
-    state.route = "home";
-    state.user = { name: "", school: schools[0], year: "1", interests: [] };
-    state.allUsers = [];
-    state.allEvents = [];
-    state.allAnnouncements = [];
-    state.allClubs = [];
-    renderAtTop();
-  } catch (error) {
-    window.alert(error.message || "Sign-out failed.");
-  }
-}
-
-async function startFirebaseLogin(mode = "google") {
-  if (!window.RVUFirebase) {
-    window.alert("Firebase is still loading. Please wait a moment and try again.");
-    return;
-  }
-
-  try {
-    if (mode === "password") {
-      const email = state.authEmail.trim();
-      const password = state.authPassword;
-      if (!email || !password) throw new Error("Enter your RVU email and password.");
-      const user = state.authMode === "signup"
-        ? await window.RVUFirebase.createEmailPasswordAccount(email, password)
-        : await window.RVUFirebase.signInWithEmailPassword(email, password);
-      await enterAuthenticatedApp(user);
-      state.loginOpen = false;
-      state.authPassword = "";
-      return;
-    }
-    const user = await window.RVUFirebase.signInWithGoogle();
-    await enterAuthenticatedApp(user);
-    state.loginOpen = false;
-  } catch (error) {
-    window.alert(error.message || "Firebase sign-in failed.");
-  }
-}
-
-function renderCreateEventModal() {
+export function renderCreateEventModal() {
   const myClub = isClubCore() ? activeClub() : null;
   const otherClubs = clubs.filter(c => c.id !== (myClub?.id || ""));
 
@@ -509,10 +40,16 @@ function renderCreateEventModal() {
 
         <div style="padding:24px;">
 
-          ${myClub ? `
+          ${isClubCore() && state.host.clubAccesses && state.host.clubAccesses.length > 1 ? `
+          <div style="margin-bottom:20px;">
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Hosting Club *</label>
+            <select id="ce-host-club" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;">
+              ${state.host.clubAccesses.map(access => `<option value="${access.club.id || access.club.slug}">${escapeHtml(access.club.name)}</option>`).join("")}
+            </select>
+          </div>` : (myClub ? `
           <div style="background:#e8e0d4;padding:10px 14px;margin-bottom:20px;border-left:3px solid #D7AC54;">
             <p style="font-size:12px;font-weight:600;color:#5a4a3a;margin:0;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;">Posting as ${escapeHtml(myClub.name)}</p>
-          </div>` : ""}
+          </div>` : "")}
 
           <div style="margin-bottom:20px;">
             <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Event Title *</label>
@@ -571,7 +108,7 @@ function renderCreateEventModal() {
   `;
 }
 
-function renderEditEventModal() {
+export function renderEditEventModal() {
   const event = events.find(e => e.id === state.editEventId) || {};
   return `
     <div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px 0 80px;">
@@ -621,7 +158,7 @@ function renderEditEventModal() {
   `;
 }
 
-function renderCreateAnnouncementModal() {
+export function renderCreateAnnouncementModal() {
   return `
     <div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px 0 80px;">
       <div style="background:#f5f2ec;width:100%;max-width:600px;margin:0 16px;">
@@ -671,7 +208,7 @@ function renderCreateAnnouncementModal() {
   `;
 }
 
-function renderLanding() {
+export function renderLanding() {
   return `
     <main class="hero">
       <div class="hero-grid-bg" aria-hidden="true"></div>
@@ -701,7 +238,7 @@ function renderLanding() {
   `;
 }
 
-function renderAuthModal() {
+export function renderAuthModal() {
   return `
     <div class="modal-layer">
       <section class="modal auth-modal">
@@ -726,7 +263,7 @@ function renderAuthModal() {
   `;
 }
 
-function renderAppShell() {
+export function renderAppShell() {
   return `
     <div class="shell">
       <header class="topbar">
@@ -791,7 +328,7 @@ function renderAppShell() {
   `;
 }
 
-function renderFooter() {
+export function renderFooter() {
   return `
     <footer class="site-footer">
       ${renderIteriumFooterContent()}
@@ -799,7 +336,7 @@ function renderFooter() {
   `;
 }
 
-function renderIteriumFooterContent() {
+export function renderIteriumFooterContent() {
   return `
     <div class="iterium-footer-inner">
       <h2>Powered by Iterium</h2>
@@ -822,7 +359,7 @@ function renderIteriumFooterContent() {
   `;
 }
 
-function renderSearchResultsHtml() {
+export function renderSearchResultsHtml() {
   const q = state.searchQuery.toLowerCase().trim();
   const hasQuery = q.length > 1;
 
@@ -886,7 +423,7 @@ function renderSearchResultsHtml() {
   `;
 }
 
-function renderSearchOverlay() {
+export function renderSearchOverlay() {
   return `
     <div style="position:fixed;inset:0;background:#f5f2ec;z-index:200;display:flex;flex-direction:column;">
 
@@ -912,13 +449,13 @@ function renderSearchOverlay() {
   `;
 }
 
-function renderTicker() {
+export function renderTicker() {
   const items = ["THIS WEEK AT RVU", "AI BUILD NIGHT", "CLUB RECRUITMENT", "PROJECT COLLABORATION", "IMPORTANT UPDATES"];
   const ticker = [...items, ...items].map((item) => `<span>${item}</span>`).join("");
   return `<div class="ticker" aria-hidden="true"><div>${ticker}</div></div>`;
 }
 
-function brandLockup() {
+export function brandLockup() {
   const sizeClass = arguments[0] === "large" ? " large" : "";
   return `
     <div class="brand-lockup${sizeClass}">
@@ -927,7 +464,7 @@ function brandLockup() {
   `;
 }
 
-function navButtons(withIcons) {
+export function navButtons(withIcons) {
   const items = [
     ["home", "Home", "home"],
     ["events", "Events", "calendar"],
@@ -935,8 +472,17 @@ function navButtons(withIcons) {
     ["projects", "Projects", "projects"],
     ["announcements", withIcons ? "Updates" : "Announcements", "announce"],
   ];
+  let pendingCount = 0;
+  if (isSuperAdmin()) {
+    pendingCount = state.hostRequests.filter(r => r.status === "pending").length;
+  } else if (isClubCore() && state.host.approved) {
+    const activeClubIds = (state.host.clubAccesses || []).map(a => a.club.id || a.club.slug);
+    pendingCount = state.hostRequests.filter(r => r.type === "clubCore" && r.status === "pending" && activeClubIds.includes(r.clubId)).length;
+  }
+  const badge = pendingCount > 0 ? `<span style="background:#e44;color:#fff;border-radius:50%;padding:2px 6px;font-size:10px;margin-left:6px;font-weight:bold;">${pendingCount}</span>` : "";
+
   if (isClubCore() || isSchoolRep() || isSuperAdmin()) {
-    items.push(["admin", "Admin", "admin"]);
+    items.push(["admin", `Admin${badge}`, "admin"]);
   }
   items.push(["profile", "Profile", "user"]);
   return items.map(([route, label, iconName]) => `
@@ -946,7 +492,7 @@ function navButtons(withIcons) {
   `).join("");
 }
 
-function createButton() {
+export function createButton() {
   return `
     <div class="create-wrap">
       <button class="btn" data-action="toggle-create">${icon("plus")} Create</button>
@@ -960,7 +506,7 @@ function createButton() {
   `;
 }
 
-function renderRoute() {
+export function renderRoute() {
   if (state.dataLoading) return renderLoadingState();
   if (state.route === "admin-create-club") return renderCreateClubPage();
   if (state.route === "events") return renderEvents();
@@ -972,7 +518,7 @@ function renderRoute() {
   return renderHome();
 }
 
-function renderLoadingState() {
+export function renderLoadingState() {
   return `
     <section class="page-head">
       ${sectionLabel("00", "Loading")}
@@ -994,7 +540,7 @@ function renderLoadingState() {
   `;
 }
 
-function renderEmptyState(title, copy, action = "") {
+export function renderEmptyState(title, copy, action = "") {
   return `
     <article class="card announcement empty-state">
       <h3>${title}</h3>
@@ -1004,7 +550,7 @@ function renderEmptyState(title, copy, action = "") {
   `;
 }
 
-function renderHome() {
+export function renderHome() {
   if (state.selectedEventId) return renderEventDetail();
   if (state.selectedProjectId) return renderProjectDetail();
   const upcoming = events.filter((event) => !event.past).sort((a, b) => a.sort - b.sort).slice(0, 5);
@@ -1073,7 +619,7 @@ function renderHome() {
   `;
 }
 
-function renderEvents() {
+export function renderEvents() {
   if (state.selectedEventId) return renderEventDetail();
   const filtered = events.filter((event) => state.filters.eventType === "All" || event.type === state.filters.eventType);
   const upcoming = filtered.filter((event) => !event.past).sort((a, b) => a.sort - b.sort);
@@ -1100,7 +646,7 @@ function renderEvents() {
   `;
 }
 
-function renderEventDetail() {
+export function renderEventDetail() {
   const event = events.find(e => e.id === state.selectedEventId);
   if (!event) {
     state.selectedEventId = null;
@@ -1185,7 +731,7 @@ function renderEventDetail() {
   `;
 }
 
-function renderClubs() {
+export function renderClubs() {
   if (state.selectedEventId) return renderEventDetail();
   if (state.selectedClubSlug) return renderClubDetail();
   const filtered = clubs.filter((club) =>
@@ -1206,7 +752,7 @@ function renderClubs() {
   `;
 }
 
-function renderClubDetail() {
+export function renderClubDetail() {
   const club = clubs.find((item) => item.slug === state.selectedClubSlug) || clubs[0];
   if (!club) return renderClubs();
   const clubEvents = events.filter((event) => event.club === club.name || event.host === club.name);
@@ -1259,7 +805,7 @@ function renderClubDetail() {
   `;
 }
 
-function renderEditAnnouncementModal() {
+export function renderEditAnnouncementModal() {
   const item = announcements.find(a => a.id === state.editAnnouncementId) || {};
   return `
     <div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px 0 80px;">
@@ -1291,7 +837,7 @@ function renderEditAnnouncementModal() {
   `;
 }
 
-function renderCreateProjectModal() {
+export function renderCreateProjectModal() {
   return `
     <div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px 0 80px;">
       <div style="background:#f5f2ec;width:100%;max-width:600px;margin:0 16px;">
@@ -1344,7 +890,7 @@ function renderCreateProjectModal() {
   `;
 }
 
-function renderProjects() {
+export function renderProjects() {
   if (state.selectedProjectId) return renderProjectDetail();
   const tags = unique(projects.flatMap((project) => project.tags || []));
   const filtered = projects.filter((project) => state.filters.projectTag === "All" || (project.tags || []).includes(state.filters.projectTag));
@@ -1366,7 +912,7 @@ function renderProjects() {
   `;
 }
 
-function renderProjectDetail() {
+export function renderProjectDetail() {
   const project = projects.find(p => p.id === state.selectedProjectId);
   if (!project) {
     state.selectedProjectId = null;
@@ -1450,7 +996,7 @@ function renderProjectDetail() {
   `;
 }
 
-function renderAnnouncements() {
+export function renderAnnouncements() {
   if (state.selectedAnnouncementId) return renderAnnouncementDetail();
   const filtered = announcements.filter((item) => state.filters.announcementType === "All" || item.type === state.filters.announcementType);
   return `
@@ -1467,7 +1013,7 @@ function renderAnnouncements() {
   `;
 }
 
-function renderAnnouncementDetail() {
+export function renderAnnouncementDetail() {
   const item = announcements.find(a => a.id === state.selectedAnnouncementId);
   if (!item) {
     state.selectedAnnouncementId = null;
@@ -1542,7 +1088,7 @@ function renderAnnouncementDetail() {
   `;
 }
 
-function renderProfile() {
+export function renderProfile() {
   const initials = (state.user.name || "?").split(" ").map(w => w[0]).slice(0, 2).join("").toUpperCase();
   const roleClass = state.role === "club-core" ? "club-core" : state.role === "school-rep" ? "school-rep" : "student";
   const roleText = roleLabel();
@@ -1727,7 +1273,7 @@ function renderProfile() {
   `;
 }
 
-function renderProfileInterestsModal() {
+export function renderProfileInterestsModal() {
   return `
     <div class="modal-layer">
       <section class="modal">
@@ -1744,7 +1290,7 @@ function renderProfileInterestsModal() {
   `;
 }
 
-function renderEditProfileModal() {
+export function renderEditProfileModal() {
   return `
     <div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px;">
       <div style="background:#f5f2ec;width:100%;max-width:480px;">
@@ -1793,7 +1339,7 @@ function renderEditProfileModal() {
   `;
 }
 
-function sectionLabel(number, label) {
+export function sectionLabel(number, label) {
   return `
     <div class="section-label">
       <span class="section-num">${number}</span>
@@ -1802,7 +1348,7 @@ function sectionLabel(number, label) {
   `;
 }
 
-function renderAdminConsole() {
+export function renderAdminConsole() {
   if (!isClubCore() && !isSchoolRep() && !isSuperAdmin()) return renderRestrictedAdmin();
   if ((isClubCore() || isSchoolRep()) && !state.host.approved) return renderPendingAdminAccess();
   if (isSuperAdmin()) return renderSuperAdminDashboard();
@@ -1817,7 +1363,7 @@ function renderAdminConsole() {
   `;
 }
 
-function renderSuperAdminDashboard() {
+export function renderSuperAdminDashboard() {
   return `
     <section class="page-head admin-head">
       ${sectionLabel("06", "Platform authority")}
@@ -1828,7 +1374,7 @@ function renderSuperAdminDashboard() {
   `;
 }
 
-function renderCreateClubPage() {
+export function renderCreateClubPage() {
   if (!isSuperAdmin()) return renderRestrictedAdmin();
   const draft = state.clubDraft;
   return `
@@ -1879,7 +1425,7 @@ function renderCreateClubPage() {
   `;
 }
 
-function renderRestrictedAdmin() {
+export function renderRestrictedAdmin() {
   return `
     <section class="page-head admin-head">
       ${sectionLabel("06", "Restricted")}
@@ -1889,7 +1435,7 @@ function renderRestrictedAdmin() {
   `;
 }
 
-function renderPendingAdminAccess() {
+export function renderPendingAdminAccess() {
   return `
     <section class="page-head admin-head">
       ${sectionLabel("06", "Pending verification")}
@@ -1918,7 +1464,7 @@ function renderPendingAdminAccess() {
   `;
 }
 
-function renderSchoolAdmin() {
+export function renderSchoolAdmin() {
   const schoolName = isSuperAdmin() ? "All schools" : state.host.school;
   const schoolEvents = events.filter((event) => event.type === "School Event" || event.type === "Faculty Event");
   return `
@@ -1973,7 +1519,7 @@ function renderSchoolAdmin() {
   `;
 }
 
-function renderClubAdmin() {
+export function renderClubAdmin() {
   const club = isSuperAdmin() ? activeClub() : activeClub();
   const clubEvents = events.filter((event) => event.club === club.name || event.host === club.name);
   const clubAnnouncements = announcements.filter((item) => item.clubId === club.id || item.clubId === club.slug || item.source === club.name);
@@ -2019,7 +1565,7 @@ function renderClubAdmin() {
             <button class="btn gold" data-action="club-assign-core" data-docid="${club.id || club.slug}">Assign core role</button>
             <button class="btn secondary" data-action="club-remove-core" data-docid="${club.id || club.slug}">Remove core role</button>
           </div>` : ""}
-          ${state.hostRequests.filter((item) => item.type === "clubCore" && item.clubId === (club.id || club.slug)).map((item) => adminRow(item.name || item.email, `${item.roleTitle || "Core"} · ${item.status}`, ["Accept", "Waitlist"])).join("") || renderEmptyState("No core requests", "Club core requests will appear here after students apply.")}
+          ${state.hostRequests.filter((item) => item.type === "clubCore" && item.clubId === (club.id || club.slug)).map((item) => adminRow(item.name || item.email, `${item.roleTitle || "Core"} · ${item.status}`, item.status === "pending" ? ["Approve", "Reject"] : [], "host", item.id)).join("") || renderEmptyState("No core requests", "Club core requests will appear here after students apply.")}
         </article>
         <article class="admin-card">
           <span class="section-num">Limits</span>
@@ -2037,7 +1583,7 @@ function renderClubAdmin() {
   `;
 }
 
-function renderSuperAdmin() {
+export function renderSuperAdmin() {
   const tabs = [
     ["requests", "Requests", state.hostRequests.length],
     ["users", "Users", state.allUsers.length],
@@ -2256,7 +1802,7 @@ function renderSuperAdmin() {
   `;
 }
 
-function adminRow(title, meta, actions, mode = "generic", id = "") {
+export function adminRow(title, meta, actions, mode = "generic", id = "") {
   return `
     <div class="admin-row">
       <div><strong>${escapeHtml(title)}</strong><span>${escapeHtml(meta)}</span></div>
@@ -2270,7 +1816,7 @@ function adminRow(title, meta, actions, mode = "generic", id = "") {
   `;
 }
 
-function renderEventCard(event) {
+export function renderEventCard(event) {
   const colors = event.colors || ["#233039", "#926d2f"];
   const date = escapeHtml(event.date || "TBA");
   const dateParts = date.split(" ");
@@ -2328,12 +1874,12 @@ function renderEventCard(event) {
   `;
 }
 
-function renderPersonalCard(item) {
+export function renderPersonalCard(item) {
   if (item.time) return renderEventCard(item);
   return renderProjectCard(item);
 }
 
-function renderUpdate(item) {
+export function renderUpdate(item) {
   let hostDisplay = item.source || "RVU";
   if (item.sourceType === "school") {
     const profile = item;
@@ -2359,11 +1905,11 @@ function renderUpdate(item) {
   `;
 }
 
-function quickCard(route, title, copy, iconName) {
+export function quickCard(route, title, copy, iconName) {
   return `<button class="quick-card" data-route="${route}">${icon(iconName)}<span><strong>${title}</strong><br>${copy}</span></button>`;
 }
 
-function renderClubCard(club) {
+export function renderClubCard(club) {
   const clubEvents = events.filter((event) => event.club === club.name || event.host === club.name).length;
   return `
     <article class="card club-card" data-club-card="${club.slug || club.id}">
@@ -2381,7 +1927,7 @@ function renderClubCard(club) {
   `;
 }
 
-function renderProjectCard(project) {
+export function renderProjectCard(project) {
   const status = project.status || "Open";
   const skills = project.skills || [];
   const isMyProject = project.postedBy === state.authUser?.email || isSuperAdmin();
@@ -2415,7 +1961,7 @@ function renderProjectCard(project) {
   `;
 }
 
-function renderAnnouncement(item) {
+export function renderAnnouncement(item) {
   let hostDisplay = item.source || "RVU";
   if (item.sourceType === "school") {
     const profile = item;
@@ -2439,7 +1985,7 @@ function renderAnnouncement(item) {
 
 /* renderAdminPanel removed — superseded by renderSuperAdmin */
 
-function renderOnboarding() {
+export function renderOnboarding() {
   if (state.onboardingStep === "role") {
     return `
       <div class="modal-layer">
@@ -2486,18 +2032,38 @@ function renderOnboarding() {
   }
   if (state.onboardingStep === "host-info") {
     const isClubRequest = state._onboardingIntent === "club-core";
-    const clubOptions = clubs.length ? clubs.map((club) => club.name) : ["No approved clubs available"];
+    const clubOptions = clubs.length ? clubs.map((club) => ({ id: club.id || club.slug, name: club.name })) : [];
     return `
       <div class="modal-layer">
         <section class="modal">
           <p class="eyebrow">${isClubRequest ? "Club core request" : "School representative request"}</p>
           <h2>${isClubRequest ? "Which club are you core in?" : "Which school do you represent?"}</h2>
-          <div class="form-grid two">
-            ${isClubRequest ? selectField("hostClub", "Club", clubOptions, activeClub().name) : selectField("hostSchool", "School", schools, state.host.school)}
-            ${inputField("hostRoleTitle", "Role", state.host.roleTitle)}
-          </div>
+          
+          ${isClubRequest ? `
+            <div style="margin-bottom:16px;">
+              ${clubOptions.length ? multiSelectField("hostClubs", "Select Clubs", clubOptions, state.host.selectedClubIds) : "<p style='font-size:14px;color:#8a7a6a;margin-bottom:16px;'>No approved clubs available.</p>"}
+              <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+                <div style="flex:1;height:1.5px;background:#e8e0d4;"></div>
+                <span style="font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;">OR</span>
+                <div style="flex:1;height:1.5px;background:#e8e0d4;"></div>
+              </div>
+              <button class="btn secondary" style="width:100%;margin-bottom:16px;" data-action="create-new-club-onboarding">Create a New Club Instead</button>
+            </div>
+            <div class="form-grid two">
+              ${inputField("hostRoleTitle", "Role (for selected clubs)", state.host.roleTitle)}
+              ${inputField("hostName", "Core display name", state.host.name)}
+            </div>
+          ` : `
+            <div class="form-grid two">
+              ${selectField("hostSchool", "School", schools, state.host.school)}
+              ${inputField("hostRoleTitle", "Role", state.host.roleTitle)}
+            </div>
+            <div class="form-grid">
+              ${inputField("hostName", "Office / representative name", state.host.name)}
+            </div>
+          `}
+          
           <div class="form-grid">
-            ${inputField("hostName", isClubRequest ? "Core display name" : "Office / representative name", state.host.name)}
             ${!isClubRequest ? `
             <div style="margin-bottom:16px;">
               <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Designation</label>
@@ -2513,16 +2079,53 @@ function renderOnboarding() {
               <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Department (optional)</label>
               <input id="srep-department" type="text" placeholder="e.g. Department of Computer Science" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
             </div>` : ""}
-            ${inputField("hostEmail", "Contact Email", state.host.email)}
-            ${isClubRequest ? selectField("hostApprover", "Approval route", ["Current president", "Super Admin"], state.host.approver) : selectField("hostApprover", "Approval route", ["Super Admin"], "Super Admin")}
-            <div class="field"><label>Description</label><textarea data-input="hostDescription">${state.host.description}</textarea></div>
-            ${inputField("hostJoin", "Join Link optional", state.host.joinLink)}
+            
+            ${isClubRequest ? "" : `
+              ${inputField("hostEmail", "Contact Email", state.host.email)}
+              ${selectField("hostApprover", "Approval route", ["Super Admin"], "Super Admin")}
+              <div class="field"><label>Description</label><textarea data-input="hostDescription">${state.host.description}</textarea></div>
+              ${inputField("hostJoin", "Join Link optional", state.host.joinLink)}
+            `}
           </div>
-          <button class="btn gold" data-action="submit-host">Submit for review</button>
+          <button class="btn gold" data-action="submit-host">${isClubRequest ? "Submit request" : "Submit for review"}</button>
         </section>
       </div>
     `;
   }
+  
+  if (state.onboardingStep === "create-club") {
+    return `
+      <div class="modal-layer">
+        <section class="modal">
+          <p class="eyebrow">New Club Creation</p>
+          <h2>Create a new club</h2>
+          <div class="form-grid two">
+            ${clubInputField("name", "Club Name", state.clubDraft.name, "e.g. Code Club")}
+            ${clubInputField("category", "Category", state.clubDraft.category, "e.g. Technical")}
+          </div>
+          <div class="form-grid">
+            <div class="field" style="margin-bottom:16px;">
+              <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">School Affiliation</label>
+              <select data-club-input="school" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;">
+                ${schools.map((school) => `<option value="${school}" ${state.clubDraft.school === school ? "selected" : ""}>${school}</option>`).join("")}
+              </select>
+            </div>
+            ${clubInputField("tagline", "Tagline", state.clubDraft.tagline, "Short, catchy description")}
+            <div class="field" style="margin-bottom:16px;">
+              <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Description</label>
+              <textarea data-club-input="description" placeholder="What is this club about?" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;resize:vertical;min-height:80px;">${escapeHtml(state.clubDraft.description || "")}</textarea>
+            </div>
+            ${clubInputField("founderRole", "Your Role", state.clubDraft.founderRole || "President", "e.g. President, Founder")}
+          </div>
+          <div style="display:flex;gap:12px;margin-top:16px;">
+            <button class="btn gold" style="flex:1;" data-action="submit-new-club">Submit for Approval</button>
+            <button class="btn secondary" data-action="back-to-host-info">Back</button>
+          </div>
+        </section>
+      </div>
+    `;
+  }
+
   if (state.onboardingStep === "host-review") {
     const isClubRequest = state._onboardingIntent === "club-core";
     return `
@@ -2540,1105 +2143,3 @@ function renderOnboarding() {
   return "";
 }
 
-function selectField(name, label, options, value) {
-  return `
-    <div class="field">
-      <label>${label}</label>
-      <select data-filter="${name}">
-        ${options.map((option) => `<option ${option === value ? "selected" : ""}>${option}</option>`).join("")}
-      </select>
-    </div>
-  `;
-}
-
-function inputField(name, label, value, type = "text") {
-  return `
-    <div class="field">
-      <label>${label}</label>
-      <input data-input="${name}" type="${type}" value="${value}" />
-    </div>
-  `;
-}
-
-function clubInputField(name, label, value, placeholder = "", type = "text") {
-  return `
-    <div class="field">
-      <label>${label}</label>
-      <input data-club-input="${name}" type="${type}" value="${escapeHtml(value || "")}" placeholder="${escapeHtml(placeholder)}" />
-    </div>
-  `;
-}
-
-function clubSelectField(name, label, options, value) {
-  return `
-    <div class="field">
-      <label>${label}</label>
-      <select data-club-input="${name}">
-        ${options.map((option) => `<option ${option === value ? "selected" : ""}>${escapeHtml(option)}</option>`).join("")}
-      </select>
-    </div>
-  `;
-}
-
-function clubTextArea(name, label, value) {
-  return `
-    <div class="field">
-      <label>${label}</label>
-      <textarea data-club-input="${name}">${escapeHtml(value || "")}</textarea>
-    </div>
-  `;
-}
-
-function unique(values) {
-  return [...new Set(values)];
-}
-
-function escapeHtml(str) {
-  if (typeof str !== "string") return str == null ? "" : String(str);
-  const div = document.createElement("div");
-  div.textContent = str;
-  return div.innerHTML;
-}
-
-function validateClubDraft() {
-  const required = [
-    ["name", "Club name"],
-    ["category", "Category"],
-    ["school", "School"],
-    ["description", "Description"],
-    ["founderName", "Founder name"],
-    ["founderEmail", "Founder RVU email"],
-    ["facultyAdvisorName", "Faculty advisor name"],
-    ["facultyAdvisorEmail", "Faculty advisor RVU email"],
-    ["currentPresidentName", "Current president name"],
-    ["currentPresidentEmail", "Current president RVU email"],
-  ];
-  const missing = required.find(([key]) => !String(state.clubDraft[key] || "").trim());
-  if (missing) return `${missing[1]} is required.`;
-  const emails = [
-    ["founderEmail", "Founder email"],
-    ["facultyAdvisorEmail", "Faculty advisor email"],
-    ["currentPresidentEmail", "Current president email"],
-  ];
-  const invalid = emails.find(([key]) => !isAllowedRvuEmail(state.clubDraft[key]));
-  if (invalid) return `${invalid[1]} must end with @rvu.edu.in.`;
-  return "";
-}
-
-function bindEvents() {
-  if (!window.rvuAuthListenersBound) {
-    window.rvuAuthListenersBound = true;
-    window.addEventListener("rvu-auth-user", (event) => {
-      if (event.detail && !state.authed) {
-        enterAuthenticatedApp(event.detail).catch((error) => {
-          window.alert(error.message || "Could not complete sign-in.");
-        });
-      }
-    });
-    window.addEventListener("rvu-auth-error", (event) => {
-      if (event.detail) window.alert(event.detail);
-    });
-    if (window.RVUFirebase?.auth?.currentUser && !state.authed) {
-      enterAuthenticatedApp(window.RVUFirebase.auth.currentUser).catch((error) => {
-        window.alert(error.message || "Could not restore session.");
-      });
-    }
-  }
-
-  document.querySelectorAll("[data-route]").forEach((button) => {
-    button.addEventListener("click", () => {
-      state.route = button.dataset.route;
-      if (state.route !== "clubs") state.selectedClubSlug = null;
-      state.createOpen = false;
-      renderAtTop();
-    });
-  });
-
-  document.querySelectorAll("[data-action]").forEach((button) => {
-    button.addEventListener("click", (event) => {
-      if (button.dataset.action === "search-input") return;
-      event.stopPropagation();
-      const origPointer = button.style.pointerEvents;
-      const origOpacity = button.style.opacity;
-      button.style.pointerEvents = "none";
-      button.style.opacity = "0.5";
-      handleAction(button.dataset.action, button.dataset)
-        .catch((error) => {
-          window.alert(error.message || "Action failed.");
-        })
-        .finally(() => {
-          button.style.pointerEvents = origPointer;
-          button.style.opacity = origOpacity;
-        });
-    });
-  });
-
-  if (!window.rvuSearchInputBound) {
-    window.rvuSearchInputBound = true;
-    app.addEventListener("input", (event) => {
-      const action = event.target.dataset?.action;
-      if (action === "search-input") {
-        state.searchQuery = event.target.value;
-        const container = document.getElementById("search-results-container");
-        if (container) {
-          container.innerHTML = renderSearchResultsHtml();
-          container.querySelectorAll("[data-action]").forEach((button) => {
-            button.addEventListener("click", (e) => {
-              e.stopPropagation();
-              handleAction(button.dataset.action, button.dataset).catch((error) => {
-                window.alert(error.message || "Action failed.");
-              });
-            });
-          });
-        } else {
-          render();
-        }
-      }
-    });
-  }
-
-  document.querySelectorAll("[data-filter]").forEach((field) => {
-    field.addEventListener("change", () => {
-      if (state.filters[field.dataset.filter] !== undefined) {
-        state.filters[field.dataset.filter] = field.value;
-      }
-      if (field.dataset.filter === "studentSchool") state.user.school = field.value;
-      if (field.dataset.filter === "studentYear") state.user.year = field.value;
-      if (field.dataset.filter === "hostClub") {
-        const club = clubs.find((item) => item.name === field.value);
-        if (club) {
-          state.host.clubSlug = club.slug;
-          state.host.name = club.name;
-          state.host.category = club.category;
-          state.host.school = club.school;
-        }
-      }
-      if (field.dataset.filter === "hostSchool") state.host.school = field.value;
-      if (field.dataset.filter === "hostApprover") state.host.approver = field.value;
-      render();
-    });
-  });
-
-  document.querySelectorAll("[data-input]").forEach((field) => {
-    field.addEventListener("input", () => {
-      const key = field.dataset.input;
-      if (key === "authEmail") state.authEmail = field.value;
-      if (key === "authPassword") state.authPassword = field.value;
-      if (key === "studentName") state.user.name = field.value;
-      if (key === "hostName") state.host.name = field.value;
-      if (key === "hostEmail") state.host.email = field.value;
-      if (key === "hostRoleTitle") state.host.roleTitle = field.value;
-      if (key === "hostDescription") state.host.description = field.value;
-      if (key === "hostJoin") state.host.joinLink = field.value;
-    });
-  });
-
-  document.querySelectorAll("[data-club-input]").forEach((field) => {
-    field.addEventListener("input", () => {
-      state.clubDraft[field.dataset.clubInput] = field.value;
-    });
-    field.addEventListener("change", () => {
-      state.clubDraft[field.dataset.clubInput] = field.value;
-    });
-  });
-
-  document.querySelectorAll("[data-club-check]").forEach((field) => {
-    field.addEventListener("change", () => {
-      state.clubDraft[field.dataset.clubCheck] = field.checked;
-    });
-  });
-
-  document.querySelectorAll("[data-onboard-role]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const intent = button.dataset.onboardRole;
-      if (intent === "student") {
-        state.onboardingStep = "student-info";
-      }
-      if (intent === "club-core") {
-        const club = activeClub();
-        state.host.type = "Club Core";
-        state.host.name = club.name;
-        state.host.category = club.category;
-        state.host.school = club.school;
-        state.host.approver = "Current president";
-        state.host.approved = false;
-        state.adminScope = "club";
-        state.onboardingStep = "host-info";
-        state._onboardingIntent = "club-core";
-      }
-      if (intent === "school-rep") {
-        state.host.type = "School Representative";
-        state.host.name = `${state.host.school} Office`;
-        state.host.category = "School";
-        state.host.approver = "Super Admin";
-        state.host.approved = false;
-        state.adminScope = "school";
-        state.onboardingStep = "host-info";
-        state._onboardingIntent = "school-rep";
-      }
-      render();
-    });
-  });
-
-  document.querySelectorAll("[data-interest]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const value = button.dataset.interest;
-      state.user.interests = state.user.interests.includes(value)
-        ? state.user.interests.filter((interest) => interest !== value)
-        : [...state.user.interests, value];
-      render();
-    });
-  });
-}
-
-async function updateClubLeadershipFromPrompt(clubId, club = {}) {
-  const currentPresidentName = await promptUser("Current president name", club.currentPresidentName || "");
-  if (currentPresidentName == null) return;
-  const currentPresidentEmail = await promptUser("Current president RVU email (@rvu.edu.in)", club.currentPresidentEmail || "");
-  if (!isAllowedRvuEmail(currentPresidentEmail)) return window.alert("Current president email must end with @rvu.edu.in.");
-  const facultyAdvisorName = await promptUser("Faculty advisor name", club.facultyAdvisorName || "");
-  if (facultyAdvisorName == null) return;
-  const facultyAdvisorEmail = await promptUser("Faculty advisor RVU email (@rvu.edu.in)", club.facultyAdvisorEmail || "");
-  if (!isAllowedRvuEmail(facultyAdvisorEmail)) return window.alert("Faculty advisor email must end with @rvu.edu.in.");
-
-  await window.RVUFirebase.updateClubLeadership(clubId, {
-    currentPresidentName,
-    currentPresidentEmail,
-    facultyAdvisorName,
-    facultyAdvisorEmail,
-  });
-  await window.RVUFirebase.assignClubCoreRole(clubId, {
-    email: currentPresidentEmail,
-    name: currentPresidentName || currentPresidentEmail,
-    role: "president",
-  });
-  await window.RVUFirebase.assignClubCoreRole(clubId, {
-    email: facultyAdvisorEmail,
-    name: facultyAdvisorName || facultyAdvisorEmail,
-    role: "facultyAdvisor",
-  });
-  await syncFirebaseData();
-}
-
-async function handleAction(action, dataset) {
-  if (action === "open-login") {
-    state.loginOpen = true;
-  }
-  if (action === "close-login") {
-    state.loginOpen = false;
-    state.authPassword = "";
-  }
-  if (action === "auth-mode") {
-    state.authMode = dataset.mode;
-  }
-  if (action === "login-google") {
-    startFirebaseLogin("google");
-    return;
-  }
-  if (action === "login-password") {
-    startFirebaseLogin("password");
-    return;
-  }
-  if (action === "preview") {
-    enterDemoApp();
-    return;
-  }
-  if (action === "next-interests") {
-    state.onboardingStep = "student-interests";
-  }
-  if (action === "finish-student") {
-    if (window.RVUFirebase && state.authUser) {
-      await window.RVUFirebase.saveUserProfile(state.authUser.uid, {
-        name: state.user.name,
-        school: state.user.school,
-        year: state.user.year,
-        interests: state.user.interests,
-        onboardingComplete: true,
-      });
-    }
-    state.onboardingStep = null;
-    state.route = "home";
-  }
-  if (action === "submit-host") {
-    const isClubIntent = state._onboardingIntent === "club-core";
-    const isSchoolIntent = state._onboardingIntent === "school-rep";
-    if (isClubIntent && !activeClub().id && !activeClub().slug) {
-      window.alert("No approved club exists in Firestore yet. Ask a super admin to create the club first.");
-      return;
-    }
-    
-    let designation = "";
-    let department = "";
-    if (isSchoolIntent) {
-      designation = document.getElementById("srep-designation")?.value || "";
-      department = document.getElementById("srep-department")?.value?.trim() || "";
-      state.host.facultyDesignation = designation;
-      state.host.facultyDepartment = department;
-      state.host.isFaculty = designation !== "Student Rep";
-    }
-
-    if (window.RVUFirebase) {
-      await window.RVUFirebase.submitHostRequest({
-        type: isClubIntent ? "clubCore" : "schoolRepresentative",
-        clubId: isClubIntent ? state.host.clubSlug : null,
-        schoolId: isSchoolIntent ? state.host.school : null,
-        name: state.host.name,
-        roleTitle: state.host.roleTitle,
-        description: state.host.description,
-        joinLink: state.host.joinLink,
-        approver: state.host.approver,
-        facultyDesignation: designation,
-        facultyDepartment: department,
-      });
-    }
-    state.host.approved = false;
-    state.onboardingStep = "host-review";
-    state.route = "home";
-  }
-  if (action === "host-review") {
-    state.onboardingStep = "host-review";
-  }
-  if (action === "close-onboarding") {
-    state.onboardingStep = null;
-    if (isClubCore() || isSchoolRep()) state.route = "admin";
-  }
-  if (action === "toggle-create") {
-    state.createOpen = !state.createOpen;
-  }
-  if (action === "create-event") {
-    if (!canHost() && !isSuperAdmin()) {
-      window.alert("You need an approved club core or school representative role to create events.");
-      return;
-    }
-    state.createEventOpen = true;
-    state.createOpen = false;
-    render();
-    return;
-  }
-  if (action === "create-announcement") {
-    if (!canHost() && !isSuperAdmin()) {
-      window.alert("You need an approved club core or school representative role to create announcements.");
-      return;
-    }
-    state.createAnnouncementOpen = true;
-    state.createOpen = false;
-    render();
-    return;
-  }
-  if (action === "open-club") {
-    state.route = "clubs";
-    state.selectedClubSlug = dataset.club;
-  }
-  if (action === "back-to-clubs") {
-    state.selectedClubSlug = null;
-  }
-  if (action === "toggle-registration") {
-    const club = clubs.find((item) => item.slug === dataset.club);
-    if (club) {
-      const originalValue = club.registrationOpen;
-      const nextValue = !originalValue;
-      club.registrationOpen = nextValue;
-      render();
-      try {
-        if (window.RVUFirebase) await window.RVUFirebase.updateClubRegistration(club.id || club.slug, nextValue);
-      } catch (error) {
-        club.registrationOpen = originalValue;
-        render();
-        throw error;
-      }
-    }
-    return;
-  }
-  if (action === "approve-host") {
-    if (window.RVUFirebase && dataset.request) {
-      await window.RVUFirebase.updateHostRequestStatus(dataset.request, "approved");
-      await syncFirebaseData();
-    }
-  }
-  if (action === "reject-host") {
-    if (window.RVUFirebase && dataset.request) {
-      await window.RVUFirebase.updateHostRequestStatus(dataset.request, "rejected");
-      await syncFirebaseData();
-    }
-  }
-  if (action === "sign-out") {
-    await handleSignOut();
-    return;
-  }
-  if (action === "admin-tab") {
-    state.adminTab = dataset.tab || "requests";
-  }
-  if (action === "admin-create-club") {
-    if (!isSuperAdmin()) return;
-    state.clubDraft = defaultClubDraft();
-    state.route = "admin-create-club";
-    renderAtTop();
-    return;
-  }
-  if (action === "admin-back-to-clubs") {
-    state.route = "admin";
-    state.adminTab = "clubs";
-    renderAtTop();
-    return;
-  }
-  if (action === "admin-reset-club-form") {
-    state.clubDraft = defaultClubDraft();
-    render();
-    return;
-  }
-  if (action === "admin-submit-club") {
-    if (!window.RVUFirebase || !isSuperAdmin()) return;
-    const error = validateClubDraft();
-    if (error) return window.alert(error);
-    const draft = { ...state.clubDraft };
-    await window.RVUFirebase.createClub({
-      ...draft,
-      name: draft.name.trim(),
-      category: draft.category.trim(),
-      tagline: draft.tagline.trim(),
-      description: draft.description.trim(),
-      founderName: draft.founderName.trim(),
-      founderEmail: draft.founderEmail.trim(),
-      facultyAdvisorName: draft.facultyAdvisorName.trim(),
-      facultyAdvisorEmail: draft.facultyAdvisorEmail.trim(),
-      currentPresidentName: draft.currentPresidentName.trim(),
-      currentPresidentEmail: draft.currentPresidentEmail.trim(),
-      join: draft.joinLink.trim(),
-      joinLink: draft.joinLink.trim(),
-    });
-    state.clubDraft = defaultClubDraft();
-    state.route = "admin";
-    state.adminTab = "clubs";
-    await syncFirebaseData();
-    renderAtTop();
-    return;
-  }
-  if (action === "admin-create-school") {
-    if (!window.RVUFirebase || !isSuperAdmin()) return;
-    const name = await promptUser("School name");
-    if (!name) return;
-    const shortName = await promptUser("Short name (optional)") || "";
-    const description = await promptUser("Description") || "";
-    const leadEmail = await promptUser("Lead/admin RVU email optional (@rvu.edu.in)") || "";
-    if (leadEmail && !isAllowedRvuEmail(leadEmail)) return window.alert("Lead email must end with @rvu.edu.in.");
-    await window.RVUFirebase.createSchool({
-      name,
-      shortName,
-      description,
-      leadEmail,
-    });
-    await syncFirebaseData();
-  }
-  if (action === "admin-delete-school") {
-    if (!window.RVUFirebase || !isSuperAdmin() || !dataset.docid) return;
-    if (!window.confirm("Delete this school record?")) return;
-    await window.RVUFirebase.deleteDocument("schools", dataset.docid);
-    await syncFirebaseData();
-  }
-  if (action === "admin-assign-core") {
-    if (!window.RVUFirebase || !isSuperAdmin() || !dataset.docid) return;
-    const email = await promptUser("Core member RVU email (@rvu.edu.in)");
-    if (!isAllowedRvuEmail(email)) return window.alert("Core email must end with @rvu.edu.in.");
-    const name = await promptUser("Core member name") || email;
-    const role = await promptUser("Core role (e.g. designLead, eventsLead, treasurer)") || "core";
-    await window.RVUFirebase.assignClubCoreRole(dataset.docid, { email, name, role });
-    await syncFirebaseData();
-  }
-  if (action === "admin-update-club-leadership") {
-    if (!window.RVUFirebase || !isSuperAdmin() || !dataset.docid) return;
-    const club = state.allClubs.find((item) => item.id === dataset.docid) || {};
-    await updateClubLeadershipFromPrompt(dataset.docid, club);
-  }
-  if (action === "club-update-leadership") {
-    if (!window.RVUFirebase || !dataset.docid) return;
-    const club = activeClub();
-    await updateClubLeadershipFromPrompt(dataset.docid, club);
-  }
-  if (action === "club-assign-core") {
-    if (!window.RVUFirebase || !dataset.docid) return;
-    const email = await promptUser("Core member RVU email (@rvu.edu.in)");
-    if (!isAllowedRvuEmail(email)) return window.alert("Core email must end with @rvu.edu.in.");
-    const name = await promptUser("Core member name") || email;
-    const role = await promptUser("Core role (e.g. eventsLead, designLead, treasurer)") || "core";
-    await window.RVUFirebase.assignClubCoreRole(dataset.docid, { email, name, role });
-    await syncFirebaseData();
-  }
-  if (action === "admin-remove-core") {
-    if (!window.RVUFirebase || !isSuperAdmin() || !dataset.docid) return;
-    const email = await promptUser("Core member email to remove");
-    if (!email) return;
-    if (!window.confirm(`Remove ${email} from this club core?`)) return;
-    await window.RVUFirebase.removeClubCoreRole(dataset.docid, email);
-    await syncFirebaseData();
-  }
-  if (action === "club-remove-core") {
-    if (!window.RVUFirebase || !dataset.docid) return;
-    const email = await promptUser("Core member email to remove");
-    if (!email) return;
-    if (!window.confirm(`Remove ${email} from this club core?`)) return;
-    await window.RVUFirebase.removeClubCoreRole(dataset.docid, email);
-    await syncFirebaseData();
-  }
-  if (action === "admin-delete-club") {
-    if (!window.RVUFirebase || !isSuperAdmin() || !dataset.docid) return;
-    if (!window.confirm("Delete this club? This cannot be undone.")) return;
-    await window.RVUFirebase.deleteDocument("clubs", dataset.docid);
-    await syncFirebaseData();
-  }
-  if (action === "admin-create-event") {
-    if (!window.RVUFirebase || !isSuperAdmin()) return;
-    const title = await promptUser("Event title");
-    if (!title) return;
-    const description = await promptUser("Description") || "";
-    const date = await promptUser("Display date") || "";
-    const time = await promptUser("Time") || "";
-    const location = await promptUser("Location") || "";
-    const host = await promptUser("Host/source") || "RVU";
-    await window.RVUFirebase.createEvent({
-      title,
-      description,
-      date,
-      time,
-      location,
-      host,
-      type: await promptUser("Type: Club Event, Faculty Event, School Event") || "School Event",
-      hostType: "admin",
-      tags: [],
-      status: "published",
-    });
-    await syncFirebaseData();
-  }
-  if (action === "admin-create-announcement") {
-    if (!window.RVUFirebase || !isSuperAdmin()) return;
-    const title = await promptUser("Announcement title");
-    if (!title) return;
-    await window.RVUFirebase.createAnnouncement({
-      title,
-      description: await promptUser("Description") || "",
-      source: await promptUser("Source") || "RVU",
-      tag: await promptUser("Tag") || "Notice",
-      type: "Faculty",
-      sourceType: "admin",
-      time: "Just now",
-      status: "published",
-    });
-    await syncFirebaseData();
-  }
-  if (action === "open-create-project") {
-    state.createProjectOpen = true;
-    render();
-    return;
-  }
-  if (action === "close-create-project") {
-    state.createProjectOpen = false;
-    renderAtTop();
-    return;
-  }
-  if (action === "submit-create-project") {
-    if (!window.RVUFirebase) return;
-    const title = document.getElementById("cp-title")?.value?.trim();
-    const description = document.getElementById("cp-description")?.value?.trim();
-    if (!title || !description) {
-      window.alert("Title and description are required.");
-      return;
-    }
-    const skills = (document.getElementById("cp-skills")?.value || "").split(",").map(s => s.trim()).filter(Boolean);
-    const tags = (document.getElementById("cp-tags")?.value || "").split(",").map(t => t.trim()).filter(Boolean);
-    const expiry = document.getElementById("cp-expiry")?.value || "";
-    const phone = document.getElementById("cp-phone")?.value?.trim() || "";
-    await window.RVUFirebase.createProject({
-      title,
-      description,
-      skills,
-      tags,
-      expiry,
-      contactPhone: phone,
-      postedBy: state.authUser?.email || state.user.name || "Student",
-      postedByName: state.user.name || "",
-      status: "open",
-      score: 0,
-    });
-    state.createProjectOpen = false;
-    await syncFirebaseData();
-    renderAtTop();
-    return;
-  }
-  if (action === "close-create-event") {
-    state.createEventOpen = false;
-    renderAtTop();
-    return;
-  }
-  if (action === "submit-create-event") {
-    if (!window.RVUFirebase) return;
-    const title = document.getElementById("ce-title")?.value?.trim();
-    const description = document.getElementById("ce-description")?.value?.trim();
-    const date = document.getElementById("ce-date")?.value || "";
-    const time = document.getElementById("ce-time")?.value || "";
-    const location = document.getElementById("ce-location")?.value?.trim() || "";
-    if (!title || !description || !date || !time || !location) {
-      window.alert("Title, description, date, time and location are required.");
-      return;
-    }
-    const link = document.getElementById("ce-link")?.value?.trim() || "";
-    const posterUrl = document.getElementById("ce-poster")?.value?.trim() || "";
-    const collab = document.getElementById("ce-collab")?.value || "";
-    const club = activeClub();
-    const payload = isClubCore() ? {
-      title, description, date, time, location,
-      hostType: "club",
-      clubId: club.id || club.slug,
-      club: club.name,
-      host: club.name,
-      type: "Club Event",
-      tags: [club.category].filter(Boolean),
-      link: link || null,
-      linkType: link ? "external" : null,
-      posterUrl: posterUrl || null,
-      collaboratingClubs: collab ? [collab] : [],
-    } : {
-      title, description, date, time, location,
-      hostType: "school",
-      schoolId: state.host.school,
-      host: state.host.school,
-      type: "School Event",
-      tags: [],
-      link: link || null,
-      posterUrl: posterUrl || null,
-      facultyDesignation: state.host.facultyDesignation || "",
-      hostName: state.host.name || "",
-      schoolName: state.host.school || "",
-    };
-    await window.RVUFirebase.createEvent(payload);
-    state.createEventOpen = false;
-    await syncFirebaseData();
-    renderAtTop();
-    return;
-  }
-  if (action === "close-create-announcement") {
-    state.createAnnouncementOpen = false;
-    renderAtTop();
-    return;
-  }
-  if (action === "submit-create-announcement") {
-    if (!window.RVUFirebase) return;
-    const title = document.getElementById("ca-title")?.value?.trim();
-    const description = document.getElementById("ca-description")?.value?.trim();
-    const tag = document.querySelector('input[name="ca-tag"]:checked')?.value || "Notice";
-    const imageUrl = document.getElementById("ca-image")?.value?.trim() || "";
-
-    if (!title || !description) {
-      window.alert("Title and description are required.");
-      return;
-    }
-
-    const payload = {
-      title,
-      description,
-      tag,
-      time: "Just now",
-      status: "published",
-    };
-
-    if (imageUrl) {
-      payload.imageUrl = imageUrl;
-    }
-
-    if (isClubCore()) {
-      const club = activeClub();
-      payload.source = club.name;
-      payload.type = "Club";
-      payload.clubId = club.id || club.slug;
-    } else if (isSchoolRep()) {
-      payload.source = state.host.school;
-      payload.sourceType = "school";
-      payload.type = "Faculty";
-      payload.schoolId = state.host.school;
-      payload.facultyDesignation = state.host.facultyDesignation || "";
-      payload.hostName = state.host.name || "";
-      payload.schoolName = state.host.school || "";
-    } else if (isSuperAdmin()) {
-      payload.source = "RVU";
-      payload.sourceType = "admin";
-      payload.type = "Faculty";
-    }
-
-    await window.RVUFirebase.createAnnouncement(payload);
-    state.createAnnouncementOpen = false;
-    await syncFirebaseData();
-    renderAtTop();
-    return;
-  }
-  if (action === "admin-unpublish-event") {
-    if (!window.RVUFirebase || !isSuperAdmin() || !dataset.docid) return;
-    await window.RVUFirebase.updateEventStatus(dataset.docid, "draft");
-    await syncFirebaseData();
-  }
-  if (action === "admin-publish-event") {
-    if (!window.RVUFirebase || !isSuperAdmin() || !dataset.docid) return;
-    await window.RVUFirebase.updateEventStatus(dataset.docid, "published");
-    await syncFirebaseData();
-  }
-  if (action === "admin-unpublish-announcement") {
-    if (!window.RVUFirebase || !isSuperAdmin() || !dataset.docid) return;
-    await window.RVUFirebase.updateAnnouncementStatus(dataset.docid, "draft");
-    await syncFirebaseData();
-  }
-  if (action === "admin-delete-event") {
-    if (!window.RVUFirebase || !isSuperAdmin() || !dataset.docid) return;
-    if (!window.confirm("Delete this event permanently?")) return;
-    await window.RVUFirebase.deleteDocument("events", dataset.docid);
-    await syncFirebaseData();
-  }
-  if (action === "admin-delete-announcement") {
-    if (!window.RVUFirebase || !isSuperAdmin() || !dataset.docid) return;
-    if (!window.confirm("Delete this announcement permanently?")) return;
-    await window.RVUFirebase.deleteDocument("announcements", dataset.docid);
-    await syncFirebaseData();
-  }
-  if (action === "admin-delete-project") {
-    if (!window.RVUFirebase || !isSuperAdmin() || !dataset.docid) return;
-    if (!window.confirm("Delete this project permanently?")) return;
-    await window.RVUFirebase.deleteDocument("projects", dataset.docid);
-    await syncFirebaseData();
-  }
-  if (action === "toggle-search") {
-    state.searchOpen = !state.searchOpen;
-    state.searchQuery = "";
-    renderAtTop();
-    return;
-  }
-  if (action === "close-search") {
-    state.searchOpen = false;
-    state.searchQuery = "";
-    renderAtTop();
-    return;
-  }
-  if (action === "search-input") {
-    return;
-  }
-  if (action === "search-open-event") {
-    state.searchOpen = false;
-    state.selectedEventId = dataset.docid;
-    state.selectedProjectId = null;
-    state.selectedAnnouncementId = null;
-    state.route = "events";
-    renderAtTop();
-    return;
-  }
-  if (action === "search-open-club") {
-    state.searchOpen = false;
-    state.selectedClubSlug = dataset.slug;
-    state.selectedEventId = null;
-    state.selectedProjectId = null;
-    state.selectedAnnouncementId = null;
-    state.route = "clubs";
-    renderAtTop();
-    return;
-  }
-  if (action === "search-open-project") {
-    state.searchOpen = false;
-    state.selectedProjectId = dataset.docid;
-    state.selectedEventId = null;
-    state.selectedAnnouncementId = null;
-    state.route = "projects";
-    renderAtTop();
-    return;
-  }
-  if (action === "search-open-announcement") {
-    state.searchOpen = false;
-    state.selectedAnnouncementId = dataset.docid;
-    state.selectedEventId = null;
-    state.selectedProjectId = null;
-    state.route = "announcements";
-    renderAtTop();
-    return;
-  }
-  if (action === "toggle-project-status") {
-    if (!window.RVUFirebase || !dataset.docid) return;
-    const newStatus = dataset.status === "open" ? "closed" : "open";
-    await window.RVUFirebase.updateDocument("projects", dataset.docid, { status: newStatus });
-    await syncFirebaseData();
-    renderAtTop();
-    return;
-  }
-  if (action === "delete-own-project") {
-    if (!window.RVUFirebase || !dataset.docid) return;
-    if (!window.confirm(`Delete "${dataset.title}"? This cannot be undone.`)) return;
-    await window.RVUFirebase.deleteDocument("projects", dataset.docid);
-    state.selectedProjectId = null;
-    await syncFirebaseData();
-    renderAtTop();
-    return;
-  }
-  if (action === "open-project-detail") {
-    state.selectedProjectId = dataset.docid;
-    renderAtTop();
-    return;
-  }
-  if (action === "close-project-detail") {
-    state.selectedProjectId = null;
-    renderAtTop();
-    return;
-  }
-  if (action === "close-event-detail") {
-    state.selectedEventId = null;
-    renderAtTop();
-    return;
-  }
-  if (action === "open-event-detail") {
-    state.selectedEventId = dataset.docid;
-    renderAtTop();
-    return;
-  }
-  if (action === "open-announcement-detail") {
-    state.selectedAnnouncementId = dataset.docid;
-    renderAtTop();
-    return;
-  }
-  if (action === "close-announcement-detail") {
-    state.selectedAnnouncementId = null;
-    renderAtTop();
-    return;
-  }
-  if (action === "edit-announcement") {
-    state.editAnnouncementId = dataset.docid;
-    state.editAnnouncementOpen = true;
-    renderAtTop();
-    return;
-  }
-  if (action === "close-edit-announcement") {
-    state.editAnnouncementOpen = false;
-    state.editAnnouncementId = null;
-    renderAtTop();
-    return;
-  }
-  if (action === "submit-edit-announcement") {
-    if (!window.RVUFirebase || !state.editAnnouncementId) return;
-    const title = document.getElementById("ea-title")?.value?.trim();
-    const description = document.getElementById("ea-description")?.value?.trim();
-    const imageUrl = document.getElementById("ea-image")?.value?.trim() || "";
-    if (!title || !description) {
-      window.alert("Title and description required.");
-      return;
-    }
-    await window.RVUFirebase.updateDocument("announcements", state.editAnnouncementId, {
-      title,
-      description,
-      imageUrl: imageUrl || null,
-    });
-    state.editAnnouncementOpen = false;
-    state.editAnnouncementId = null;
-    await syncFirebaseData();
-    renderAtTop();
-    return;
-  }
-  if (action === "cancel-event") {
-    if (!window.RVUFirebase || !dataset.docid) return;
-    if (!window.confirm(`Mark "${dataset.title}" as cancelled? It will stay visible with a Cancelled badge.`)) return;
-    await window.RVUFirebase.updateDocument("events", dataset.docid, {
-      status: "cancelled",
-      cancelled: true,
-    });
-    await syncFirebaseData();
-    renderAtTop();
-    return;
-  }
-  if (action === "open-edit-event") {
-    state.editEventId = dataset.docid;
-    state.editEventOpen = true;
-    renderAtTop();
-    return;
-  }
-  if (action === "close-edit-event") {
-    state.editEventId = null;
-    state.editEventOpen = false;
-    renderAtTop();
-    return;
-  }
-  if (action === "submit-edit-event") {
-    if (!window.RVUFirebase || !state.editEventId) return;
-    const title = document.getElementById("ee-title")?.value?.trim();
-    const description = document.getElementById("ee-description")?.value?.trim();
-    const date = document.getElementById("ee-date")?.value || "";
-    const time = document.getElementById("ee-time")?.value || "";
-    const location = document.getElementById("ee-location")?.value?.trim() || "";
-    const link = document.getElementById("ee-link")?.value?.trim() || "";
-    const posterUrl = document.getElementById("ee-poster")?.value?.trim() || "";
-    if (!title || !description) {
-      window.alert("Title and description required.");
-      return;
-    }
-    await window.RVUFirebase.updateDocument("events", state.editEventId, {
-      title,
-      description,
-      date,
-      time,
-      location,
-      link: link || null,
-      posterUrl: posterUrl || null,
-    });
-    state.editEventOpen = false;
-    state.editEventId = null;
-    await syncFirebaseData();
-    renderAtTop();
-    return;
-  }
-  if (action === "save-item") {
-    if (!window.RVUFirebase || !dataset.docid) return;
-    const itemData = { itemId: dataset.docid, type: dataset.kind || "item", title: dataset.title || "", id: dataset.docid };
-    state.savedItems = [...(state.savedItems || []), itemData];
-    render();
-    await window.RVUFirebase.saveItem(itemData);
-    window.alert("Saved to your campus dashboard.");
-    return;
-  }
-  if (action === "follow-club") {
-    if (!window.RVUFirebase || !dataset.docid) return;
-    state.followedClubs = [...(state.followedClubs || []), { clubId: dataset.docid, title: dataset.title || "", id: dataset.docid }];
-    render();
-    await window.RVUFirebase.followClub(dataset.docid, dataset.title || "");
-    window.alert("Club followed.");
-    return;
-  }
-  if (action === "unfollow-club") {
-    if (!window.RVUFirebase || !dataset.docid) return;
-    state.followedClubs = (state.followedClubs || []).filter(c => c.clubId !== dataset.docid && c.id !== dataset.docid);
-    render();
-    await window.RVUFirebase.unfollowClub(dataset.docid);
-    return;
-  }
-  if (action === "rsvp-event") {
-    if (!window.RVUFirebase || !dataset.docid) return;
-    state.rsvps = [...(state.rsvps || []), { eventId: dataset.docid, title: dataset.title || "", status: "going", id: dataset.docid }];
-    render();
-    await window.RVUFirebase.rsvpEvent(dataset.docid, { title: dataset.title || "", status: "going" });
-    window.alert("RSVP saved.");
-    return;
-  }
-  if (action === "apply-project") {
-    if (!window.RVUFirebase || !dataset.docid) return;
-    const note = await promptUser("Short application note optional") || "";
-    state.myApplications = [...(state.myApplications || []), { projectId: dataset.docid, title: dataset.title || "", status: "pending", id: dataset.docid }];
-    render();
-    await window.RVUFirebase.applyToProject(dataset.docid, {
-      title: dataset.title || "",
-      name: state.user.name || state.authUser?.displayName || "",
-      note,
-    });
-    window.alert("Application submitted.");
-    return;
-  }
-  if (action === "flag-content") {
-    if (!window.RVUFirebase || !dataset.docid) return;
-    const reason = await promptUser("Why are you reporting this?");
-    if (!reason) return;
-    await window.RVUFirebase.flagContent({
-      collection: dataset.kind || "content",
-      targetId: dataset.docid,
-      title: dataset.title || "",
-      reason,
-    });
-    window.alert("Report sent to Super Admin.");
-  }
-  if (action === "calendar-event") {
-    const event = events.find((item) => item.id === dataset.docid);
-    if (!event) return;
-    const details = encodeURIComponent(event.description || "");
-    const text = encodeURIComponent(event.title || "RVU Event");
-    const location = encodeURIComponent(event.location || "RV University");
-    window.open(`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${text}&details=${details}&location=${location}`, "_blank", "noopener");
-  }
-  if (action === "toast") {
-    window.alert(dataset.message || "Done");
-  }
-  if (action === "go-profile") {
-    state.route = "profile";
-    state.selectedClubSlug = null;
-    state.createOpen = false;
-    renderAtTop();
-    return;
-  }
-  if (action === "edit-profile") {
-    state.editProfileOpen = true;
-    renderAtTop();
-    return;
-  }
-  if (action === "close-edit-profile") {
-    state.editProfileOpen = false;
-    renderAtTop();
-    return;
-  }
-  if (action === "ep-year") {
-    state.user.year = dataset.year;
-    renderAtTop();
-    return;
-  }
-  if (action === "submit-edit-profile") {
-    const name = document.getElementById("ep-name")?.value?.trim();
-    const school = document.getElementById("ep-school")?.value;
-    if (!name) {
-      window.alert("Name cannot be empty.");
-      return;
-    }
-    state.user.name = name;
-    state.user.school = school;
-    if (window.RVUFirebase && state.authUser) {
-      await window.RVUFirebase.updateUserProfile(state.authUser.uid, {
-        name,
-        school,
-        year: state.user.year,
-      });
-    }
-    state.editProfileOpen = false;
-    renderAtTop();
-    return;
-  }
-  if (action === "open-profile-interests" || action === "edit-interests") {
-    state._profileInterestsOpen = true;
-    render();
-    return;
-  }
-  if (action === "close-profile-interests") {
-    state._profileInterestsOpen = false;
-    if (window.RVUFirebase && state.authUser) {
-      window.RVUFirebase.saveUserProfile(state.authUser.uid, {
-        interests: state.user.interests,
-      }).catch(() => {});
-    }
-    render();
-    return;
-  }
-  renderAtTop();
-}
-
-window.addEventListener("rvu-auth-user", (event) => {
-  if (event.detail) {
-    enterAuthenticatedApp(event.detail);
-  } else {
-    state.authed = false;
-    state.authUser = null;
-    state.role = "student";
-    state.dataLoading = false;
-    render();
-  }
-});
-
-window.addEventListener("rvu-auth-error", (event) => {
-  if (event.detail) window.alert(event.detail);
-});
-
-if (window.RVUFirebase?.auth?.currentUser) {
-  enterAuthenticatedApp(window.RVUFirebase.auth.currentUser);
-} else {
-  state.dataLoading = false;
-  render();
-}
-
-window.addEventListener("popstate", (event) => {
-  if (event.state && event.state.route) {
-    state.route = event.state.route;
-  } else {
-    state.route = new URLSearchParams(window.location.search).get("route") || "home";
-  }
-  renderAtTop();
-});

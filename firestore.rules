@@ -69,7 +69,7 @@ service cloud.firestore {
       allow update: if isRvuEmail()
         && createsOwnDoc(uid)
         && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['name', 'school', 'year', 'interests', 'onboardingComplete', 'updatedAt']);
+          .hasOnly(['name', 'school', 'year', 'interests', 'onboardingComplete', 'clubIds', 'updatedAt']);
 
       allow update, delete: if isSuperAdmin();
 
