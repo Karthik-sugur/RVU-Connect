@@ -1,6 +1,7 @@
 import { replaceCollection } from './utils.js';
 import { schools, interests, events, clubs, announcements, projects, state } from './state.js';
 import { render, renderAtTop } from './ui.js';
+import { applyDemoCampusData } from '../sample-data.js';
 
 export function isClubCore() {
   return state.role === "club-core";
