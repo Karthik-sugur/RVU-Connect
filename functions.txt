@@ -1,0 +1,312 @@
+async function promptUser(message, defaultValue = "") {
+    const overlay = document.createElement("div");
+    const modal = document.createElement("div");
+    const label = document.createElement("p");
+    const input = document.createElement("input");
+    const btnContainer = document.createElement("div");
+    const cancelBtn = document.createElement("button");
+    const okBtn = document.createElement("button");
+    const cleanup = () => document.body.removeChild(overlay);
+  const overlay = document.createElement("div");
+  const modal = document.createElement("div");
+  const label = document.createElement("p");
+  const btnContainer = document.createElement("div");
+  const okBtn = document.createElement("button");
+  const cleanup = () => { if (document.body.contains(overlay)) document.body.removeChild(overlay); };
+const icons = {
+const schools = [
+const interests = ["AI", "Web Development", "Design", "Business", "Finance", "Marketing", "Product", "Film", "Law", "Healthcare"];
+const events = [];
+const clubs = [];
+const announcements = [];
+const projects = [];
+const state = {
+const app = document.querySelector("#app");
+function defaultClubDraft() {
+function replaceCollection(target, values) {
+function icon(name) {
+function isClubCore() {
+function isSchoolRep() {
+function isSuperAdmin() {
+function canHost() {
+function roleLabel() {
+function activeClub() {
+function isAllowedRvuEmail(email) {
+function render() {
+function renderAtTop() {
+async function syncFirebaseData() {
+  const profile = await window.RVUFirebase.ensureUserProfile(state.authUser);
+  const roleMap = {
+  const data = await window.RVUFirebase.loadCampusData({ superAdmin: state.role === "admin", profile });
+function normalizeEvent(event) {
+  const eventDate = event.date || event.displayDate || "";
+function hydrateCampusState(data) {
+async function enterAuthenticatedApp(user) {
+function enterDemoApp() {
+  const data = applyDemoCampusData({});
+async function handleSignOut() {
+async function startFirebaseLogin(mode = "google") {
+      const email = state.authEmail.trim();
+      const password = state.authPassword;
+      const user = state.authMode === "signup"
+    const user = await window.RVUFirebase.signInWithGoogle();
+function renderCreateEventModal() {
+  const myClub = isClubCore() ? activeClub() : null;
+  const otherClubs = clubs.filter(c => c.id !== (myClub?.id || ""));
+function renderEditEventModal() {
+  const event = events.find(e => e.id === state.editEventId) || {};
+function renderCreateAnnouncementModal() {
+function renderLanding() {
+function renderAuthModal() {
+function renderAppShell() {
+function renderFooter() {
+function renderIteriumFooterContent() {
+function renderSearchResultsHtml() {
+  const q = state.searchQuery.toLowerCase().trim();
+  const hasQuery = q.length > 1;
+  const matchedEvents = hasQuery
+  const matchedClubs = hasQuery
+  const matchedProjects = hasQuery
+  const matchedAnnouncements = hasQuery
+  const total = matchedEvents.length + matchedClubs.length + matchedProjects.length + matchedAnnouncements.length;
+  const resultGroup = (label, items, renderFn) => items.length ? `
+  const eventResult = e => `
+  const clubResult = c => `
+  const projectResult = p => `
+  const announcementResult = a => `
+function renderSearchOverlay() {
+function renderTicker() {
+  const items = ["THIS WEEK AT RVU", "AI BUILD NIGHT", "CLUB RECRUITMENT", "PROJECT COLLABORATION", "IMPORTANT UPDATES"];
+  const ticker = [...items, ...items].map((item) => `<span>${item}</span>`).join("");
+function brandLockup() {
+  const sizeClass = arguments[0] === "large" ? " large" : "";
+function navButtons(withIcons) {
+  const items = [
+  let pendingCount = 0;
+    const activeClubIds = (state.host.clubAccesses || []).map(a => a.club.id || a.club.slug);
+  const badge = pendingCount > 0 ? `<span style="background:#e44;color:#fff;border-radius:50%;padding:2px 6px;font-size:10px;margin-left:6px;font-weight:bold;">${pendingCount}</span>` : "";
+function createButton() {
+function renderRoute() {
+function renderLoadingState() {
+function renderEmptyState(title, copy, action = "") {
+function renderHome() {
+  const upcoming = events.filter((event) => !event.past).sort((a, b) => a.sort - b.sort).slice(0, 5);
+  const personalized = [...events, ...projects].filter((item) => (item.tags || []).some((tag) => state.user.interests.includes(tag) || state.user.interests.includes(tag.replace("Web", "Web Development")))).slice(0, 4);
+  const nextEvent = upcoming[0];
+function renderEvents() {
+  const filtered = events.filter((event) => state.filters.eventType === "All" || event.type === state.filters.eventType);
+  const upcoming = filtered.filter((event) => !event.past).sort((a, b) => a.sort - b.sort);
+  const past = filtered.filter((event) => event.past);
+function renderEventDetail() {
+  const event = events.find(e => e.id === state.selectedEventId);
+  const isPast = event.past === true;
+  const isCancelled = event.cancelled === true;
+function renderClubs() {
+  const filtered = clubs.filter((club) =>
+function renderClubDetail() {
+  const club = clubs.find((item) => item.slug === state.selectedClubSlug) || clubs[0];
+  const clubEvents = events.filter((event) => event.club === club.name || event.host === club.name);
+  const upcoming = clubEvents.filter((event) => !event.past);
+  const past = clubEvents.filter((event) => event.past);
+function renderEditAnnouncementModal() {
+  const item = announcements.find(a => a.id === state.editAnnouncementId) || {};
+function renderCreateProjectModal() {
+function renderProjects() {
+  const tags = unique(projects.flatMap((project) => project.tags || []));
+  const filtered = projects.filter((project) => state.filters.projectTag === "All" || (project.tags || []).includes(state.filters.projectTag));
+function renderProjectDetail() {
+  const project = projects.find(p => p.id === state.selectedProjectId);
+  const isOpen = project.status === "open";
+  const isMyProject = project.postedBy === state.authUser?.email || isSuperAdmin();
+  const isLoggedIn = !!state.authUser;
+function renderAnnouncements() {
+  const filtered = announcements.filter((item) => state.filters.announcementType === "All" || item.type === state.filters.announcementType);
+function renderAnnouncementDetail() {
+  const item = announcements.find(a => a.id === state.selectedAnnouncementId);
+  const tagColors = {
+  const tagColor = tagColors[item.tag] || "#8a7a6a";
+  const canEdit = (isClubCore() && item.clubId === state.host.clubSlug) ||
+function renderProfile() {
+  const initials = (state.user.name || "?").split(" ").map(w => w[0]).slice(0, 2).join("").toUpperCase();
+  const roleClass = state.role === "club-core" ? "club-core" : state.role === "school-rep" ? "school-rep" : "student";
+  const roleText = roleLabel();
+  const roleBadge = `<span style="
+  const chip = text => `<span style="
+  const section = (title, content) => `
+  const listRow = (left, right) => `
+  const badge = (text, color) => `<span style="
+  const interestContent = (state.user.interests || []).length
+  const followContent = state.followedClubs.length
+  const rsvpContent = state.rsvps.length
+  const appliedContent = state.myApplications.length
+  const savedContent = state.savedItems.length
+        const typeColor = s.type === "event" ? "#D7AC54" : s.type === "project" ? "#6a5acd" : "#3a8a9a";
+  const recentActivity = [
+  const activityColors = {
+function renderProfileInterestsModal() {
+function renderEditProfileModal() {
+function sectionLabel(number, label) {
+function renderAdminConsole() {
+  const dashboard = isClubCore() ? renderClubAdmin() : renderSchoolAdmin();
+function renderSuperAdminDashboard() {
+function renderCreateClubPage() {
+  const draft = state.clubDraft;
+function renderRestrictedAdmin() {
+function renderPendingAdminAccess() {
+function renderSchoolAdmin() {
+  const schoolName = isSuperAdmin() ? "All schools" : state.host.school;
+  const schoolEvents = events.filter((event) => event.type === "School Event" || event.type === "Faculty Event");
+function renderClubAdmin() {
+  const club = isSuperAdmin() ? activeClub() : activeClub();
+  const clubEvents = events.filter((event) => event.club === club.name || event.host === club.name);
+  const clubAnnouncements = announcements.filter((item) => item.clubId === club.id || item.clubId === club.slug || item.source === club.name);
+  const canManageCore = isSuperAdmin() || ["president", "owner"].includes((state.host.roleTitle || "").toLowerCase());
+function renderSuperAdmin() {
+  const tabs = [
+  const tabBar = `
+  let content = "";
+    const pending = state.hostRequests.filter((r) => r.status === "pending");
+    const resolved = state.hostRequests.filter((r) => r.status !== "pending");
+    const roleLabels = { superAdmin: "Super Admin", clubCore: "Club Core", schoolRepresentative: "School Rep", student: "Student" };
+    const schoolRows = state.allSchools.length
+function adminRow(title, meta, actions, mode = "generic", id = "") {
+          const dataAction = mode === "host" && action === "Approve" ? "approve-host" : mode === "host" && action === "Reject" ? "reject-host" : "toast";
+function renderEventCard(event) {
+  const colors = event.colors || ["#233039", "#926d2f"];
+  const date = escapeHtml(event.date || "TBA");
+  const dateParts = date.split(" ");
+  const tags = event.tags || [];
+  const isPast = event.past === true;
+  const isMyEvent = (isClubCore() && event.clubId === state.host.clubSlug) || isSuperAdmin();
+  let hostDisplay = event.host || "RVU";
+    const profile = event;
+    const source = event.host || "School";
+    const schoolName = event.schoolName || event.schoolId || source;
+  const actionButtons = isPast
+function renderPersonalCard(item) {
+function renderUpdate(item) {
+  let hostDisplay = item.source || "RVU";
+    const profile = item;
+    const source = item.source || "School";
+    const schoolName = item.schoolName || item.schoolId || source;
+function quickCard(route, title, copy, iconName) {
+function renderClubCard(club) {
+  const clubEvents = events.filter((event) => event.club === club.name || event.host === club.name).length;
+function renderProjectCard(project) {
+  const status = project.status || "Open";
+  const skills = project.skills || [];
+  const isMyProject = project.postedBy === state.authUser?.email || isSuperAdmin();
+function renderAnnouncement(item) {
+  let hostDisplay = item.source || "RVU";
+    const profile = item;
+    const source = item.source || "School";
+    const schoolName = item.schoolName || item.schoolId || source;
+function renderOnboarding() {
+    const isClubRequest = state._onboardingIntent === "club-core";
+    const clubOptions = clubs.length ? clubs.map((club) => ({ id: club.id || club.slug, name: club.name })) : [];
+    const isClubRequest = state._onboardingIntent === "club-core";
+function multiSelectField(name, label, options, selectedValues = []) {
+function selectField(name, label, options, value) {
+function inputField(name, label, value, type = "text") {
+function clubInputField(name, label, value, placeholder = "", type = "text") {
+function clubSelectField(name, label, options, value) {
+function clubTextArea(name, label, value) {
+function unique(values) {
+function escapeHtml(str) {
+  const div = document.createElement("div");
+function validateClubDraft() {
+  const required = [
+  const missing = required.find(([key]) => !String(state.clubDraft[key] || "").trim());
+  const emails = [
+  const invalid = emails.find(([key]) => !isAllowedRvuEmail(state.clubDraft[key]));
+function bindEvents() {
+      const origPointer = button.style.pointerEvents;
+      const origOpacity = button.style.opacity;
+      const action = event.target.dataset?.action;
+        const container = document.getElementById("search-results-container");
+        const club = clubs.find((item) => item.name === field.value);
+      const key = field.dataset.input;
+      const name = checkbox.dataset.multiSelect;
+      const intent = button.dataset.onboardRole;
+        const club = activeClub();
+      const value = button.dataset.interest;
+async function updateClubLeadershipFromPrompt(clubId, club = {}) {
+  const currentPresidentName = await promptUser("Current president name", club.currentPresidentName || "");
+  const currentPresidentEmail = await promptUser("Current president RVU email (@rvu.edu.in)", club.currentPresidentEmail || "");
+  const facultyAdvisorName = await promptUser("Faculty advisor name", club.facultyAdvisorName || "");
+  const facultyAdvisorEmail = await promptUser("Faculty advisor RVU email (@rvu.edu.in)", club.facultyAdvisorEmail || "");
+async function handleAction(action, dataset) {
+    const isClubIntent = state._onboardingIntent === "club-core";
+    const isSchoolIntent = state._onboardingIntent === "school-rep";
+    let designation = "";
+    let department = "";
+    const club = clubs.find((item) => item.slug === dataset.club);
+      const originalValue = club.registrationOpen;
+      const nextValue = !originalValue;
+    const error = validateClubDraft();
+    const draft = { ...state.clubDraft };
+    const name = await promptUser("School name");
+    const shortName = await promptUser("Short name (optional)") || "";
+    const description = await promptUser("Description") || "";
+    const leadEmail = await promptUser("Lead/admin RVU email optional (@rvu.edu.in)") || "";
+    const email = await promptUser("Core member RVU email (@rvu.edu.in)");
+    const name = await promptUser("Core member name") || email;
+    const role = await promptUser("Core role (e.g. designLead, eventsLead, treasurer)") || "core";
+    const club = state.allClubs.find((item) => item.id === dataset.docid) || {};
+    const club = activeClub();
+    const email = await promptUser("Core member RVU email (@rvu.edu.in)");
+    const name = await promptUser("Core member name") || email;
+    const role = await promptUser("Core role (e.g. eventsLead, designLead, treasurer)") || "core";
+    const email = await promptUser("Core member email to remove");
+    const email = await promptUser("Core member email to remove");
+    const title = await promptUser("Event title");
+    const description = await promptUser("Description") || "";
+    const date = await promptUser("Display date") || "";
+    const time = await promptUser("Time") || "";
+    const location = await promptUser("Location") || "";
+    const host = await promptUser("Host/source") || "RVU";
+    const title = await promptUser("Announcement title");
+    const title = document.getElementById("cp-title")?.value?.trim();
+    const description = document.getElementById("cp-description")?.value?.trim();
+    const skills = (document.getElementById("cp-skills")?.value || "").split(",").map(s => s.trim()).filter(Boolean);
+    const tags = (document.getElementById("cp-tags")?.value || "").split(",").map(t => t.trim()).filter(Boolean);
+    const expiry = document.getElementById("cp-expiry")?.value || "";
+    const phone = document.getElementById("cp-phone")?.value?.trim() || "";
+    const title = document.getElementById("ce-title")?.value?.trim();
+    const description = document.getElementById("ce-description")?.value?.trim();
+    const date = document.getElementById("ce-date")?.value || "";
+    const time = document.getElementById("ce-time")?.value || "";
+    const location = document.getElementById("ce-location")?.value?.trim() || "";
+    const link = document.getElementById("ce-link")?.value?.trim() || "";
+    const posterUrl = document.getElementById("ce-poster")?.value?.trim() || "";
+    const collab = document.getElementById("ce-collab")?.value || "";
+    let club = activeClub();
+    const hostClubId = document.getElementById("ce-host-club")?.value;
+      const access = state.host.clubAccesses.find(a => a.club.id === hostClubId || a.club.slug === hostClubId);
+    const payload = isClubCore() ? {
+    const title = document.getElementById("ca-title")?.value?.trim();
+    const description = document.getElementById("ca-description")?.value?.trim();
+    const tag = document.querySelector('input[name="ca-tag"]:checked')?.value || "Notice";
+    const imageUrl = document.getElementById("ca-image")?.value?.trim() || "";
+    const payload = {
+      const club = activeClub();
+    const newStatus = dataset.status === "open" ? "closed" : "open";
+    const title = document.getElementById("ea-title")?.value?.trim();
+    const description = document.getElementById("ea-description")?.value?.trim();
+    const imageUrl = document.getElementById("ea-image")?.value?.trim() || "";
+    const title = document.getElementById("ee-title")?.value?.trim();
+    const description = document.getElementById("ee-description")?.value?.trim();
+    const date = document.getElementById("ee-date")?.value || "";
+    const time = document.getElementById("ee-time")?.value || "";
+    const location = document.getElementById("ee-location")?.value?.trim() || "";
+    const link = document.getElementById("ee-link")?.value?.trim() || "";
+    const posterUrl = document.getElementById("ee-poster")?.value?.trim() || "";
+    const itemData = { itemId: dataset.docid, type: dataset.kind || "item", title: dataset.title || "", id: dataset.docid };
+    const note = await promptUser("Short application note optional") || "";
+    const reason = await promptUser("Why are you reporting this?");
+    const event = events.find((item) => item.id === dataset.docid);
+    const details = encodeURIComponent(event.description || "");
+    const text = encodeURIComponent(event.title || "RVU Event");
+    const location = encodeURIComponent(event.location || "RV University");
+    const name = document.getElementById("ep-name")?.value?.trim();
+    const school = document.getElementById("ep-school")?.value;

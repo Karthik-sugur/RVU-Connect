@@ -1,0 +1,25 @@
+# macOS
+.DS_Store
+
+# VS Code
+.vscode/
+
+# Firebase
+.firebase/
+firebase-debug.log
+
+# Node
+node_modules/
+functions/node_modules/
+
+# Environment
+.env
+.env.local
+.env.*
+
+# Python
+__pycache__/
+*.pyc
+
+# Logs
+*.log
