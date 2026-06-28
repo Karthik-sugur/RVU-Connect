@@ -473,6 +473,7 @@ function renderRequests() {
         <p class="eyebrow">History</p>
         <h3>Resolved requests</h3>
         ${listRows(resolved, (item) => simpleRow(item.name || item.email, `${item.type || "Request"} · ${item.status || "unknown"}`), "No resolved requests.")}
+        ${state.adminCursors?.requests ? `<div style="margin-top: 16px; text-align: center;"><button class="btn secondary" data-action="load-more-admin-tab">Load More</button></div>` : ""}
       </article>
     </div>
   `;
@@ -618,6 +619,7 @@ function renderEvents() {
         <p class="eyebrow">Manage</p>
         <h3>Events</h3>
         ${listRows(state.data.allEvents, eventRow, "No events yet.")}
+        ${state.adminCursors?.events ? `<div style="margin-top: 16px; text-align: center;"><button class="btn secondary" data-action="load-more-admin-tab">Load More</button></div>` : ""}
       </article>
     </div>
   `;
@@ -654,6 +656,7 @@ function renderAnnouncements() {
         <p class="eyebrow">Manage</p>
         <h3>Notices</h3>
         ${listRows(state.data.allAnnouncements, announcementRow, "No announcements yet.")}
+        ${state.adminCursors?.announcements ? `<div style="margin-top: 16px; text-align: center;"><button class="btn secondary" data-action="load-more-admin-tab">Load More</button></div>` : ""}
       </article>
     </div>
   `;
@@ -708,6 +711,7 @@ function renderUsers() {
         <button class="btn gold" data-action="export-users">Download CSV</button>
       </div>
       ${listRows(state.data.allUsers, userRow, "No users yet.")}
+      ${state.adminCursors?.users ? `<div style="margin-top: 16px; text-align: center;"><button class="btn secondary" data-action="load-more-admin-tab">Load More</button></div>` : ""}
     </article>
   `;
 }
@@ -738,6 +742,7 @@ function renderReview() {
         <p class="eyebrow">Queue</p>
         <h3>Pending reviews</h3>
         ${listRows(state.data.contentReviews, reviewRow, "No content reviews yet.")}
+        ${state.adminCursors?.contentReviews ? `<div style="margin-top: 16px; text-align: center;"><button class="btn secondary" data-action="load-more-admin-tab">Load More</button></div>` : ""}
       </article>
     </div>
   `;
@@ -838,6 +843,7 @@ function renderModeration() {
       <p class="eyebrow">Quality</p>
       <h3>Moderation flags</h3>
       ${listRows(state.data.moderationFlags, (item) => simpleRow(item.title || item.reason || "Flag", `${item.collection || "Content"} · ${item.status || "Open"}`), "No moderation flags.")}
+      ${state.adminCursors?.flags ? `<div style="margin-top: 16px; text-align: center;"><button class="btn secondary" data-action="load-more-admin-tab">Load More</button></div>` : ""}
     </article>
   `;
 }
@@ -1148,12 +1154,53 @@ async function handleAction(action, id) {
     render();
     return;
   }
+  if (action === "load-more-admin-tab") {
+    const tab = state.tab;
+    const mapping = {
+      requests: "hostRequests",
+      flags: "moderationFlags",
+      users: "allUsers",
+      events: "allEvents",
+      announcements: "allAnnouncements",
+      review: "contentReviews"
+    };
+    const field = mapping[tab];
+    if (field) {
+      const lastId = state.adminCursors?.[tab];
+      const res = await window.RVUFirebase.loadAdminTab(tab, lastId);
+      state.data[field].push(...res.docs);
+      state.adminCursors[tab] = res.lastDocId;
+      render();
+    }
+    return;
+  }
 }
 
 function bindEvents() {
   document.querySelectorAll("[data-tab]").forEach((button) => {
-    button.addEventListener("click", () => {
-      state.tab = button.dataset.tab;
+    button.addEventListener("click", async () => {
+      const tab = button.dataset.tab;
+      state.tab = tab;
+      
+      const mapping = {
+        requests: "hostRequests",
+        flags: "moderationFlags",
+        users: "allUsers",
+        events: "allEvents",
+        announcements: "allAnnouncements",
+        review: "contentReviews"
+      };
+      const field = mapping[tab];
+      if (field && state.data[field].length === 0) {
+        state.loading = true;
+        render();
+        const res = await window.RVUFirebase.loadAdminTab(tab);
+        state.data[field] = res.docs;
+        state.adminCursors = state.adminCursors || {};
+        state.adminCursors[tab] = res.lastDocId;
+        state.loading = false;
+      }
+      
       render();
       window.scrollTo({ top: 0, left: 0, behavior: "instant" });
     });

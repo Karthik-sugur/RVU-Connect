@@ -3,7 +3,7 @@ import { getAnalytics, isSupported as analyticsIsSupported } from "https://www.g
 import { getAuth } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 import { initializeAppCheck, ReCaptchaV3Provider } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-appcheck.js";
-import { getFunctions } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-functions.js";
+
 
 import { CONFIG } from "./config.js";
 
@@ -16,7 +16,7 @@ export const appCheck = initializeAppCheck(app, {
 });
 
 export const auth = getAuth(app);
-export const functions = getFunctions(app);
+
 export const db = initializeFirestore(app, {
   localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
 });

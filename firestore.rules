@@ -31,11 +31,7 @@ service cloud.firestore {
 
     function isSuperAdmin() {
       return isRvuEmail()
-        && (
-          myRole() == 'superAdmin'
-          || exists(/databases/$(database)/documents/superAdmins/$(request.auth.uid))
-          || exists(/databases/$(database)/documents/superAdmins/$(request.auth.token.email))
-        );
+        && exists(/databases/$(database)/documents/superAdmins/$(request.auth.uid));
     }
 
     function isApprovedClubCore(clubId) {
@@ -75,12 +71,12 @@ service cloud.firestore {
 
       allow read: if isSuperAdmin() || (isRvuEmail() && createsOwnDoc(uid));
 
-      allow update: if isRvuEmail() && isNotSuspended()
+      allow update: if isSuperAdmin() || (isRvuEmail() && isNotSuspended()
         && createsOwnDoc(uid)
         && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['name', 'school', 'year', 'interests', 'onboardingComplete', 'clubIds', 'updatedAt']);
+          .hasOnly(['name', 'school', 'year', 'interests', 'onboardingComplete', 'clubIds', 'updatedAt']));
 
-      allow update, delete: if isSuperAdmin();
+      allow delete: if isSuperAdmin();
 
       match /savedItems/{savedId} {
         allow read, create, update, delete: if isRvuEmail() && createsOwnDoc(uid);
@@ -101,8 +97,7 @@ service cloud.firestore {
     }
 
     match /superAdmins/{adminId} {
-      allow read: if isRvuEmail()
-        && (adminId == request.auth.uid || adminId == request.auth.token.email);
+      allow read: if isRvuEmail() && adminId == request.auth.uid;
       allow create, update, delete: if isSuperAdmin();
     }
 
@@ -193,6 +188,7 @@ service cloud.firestore {
       allow read: if isRvuEmail() && (isPublished() || isSuperAdmin());
 
       allow create: if isRvuEmail() && isNotSuspended()
+        && request.resource.data.createdBy == request.auth.uid
         && (
           (request.resource.data.hostType == 'club'
             && isApprovedClubCore(request.resource.data.clubId))
@@ -221,6 +217,7 @@ service cloud.firestore {
       allow read: if isRvuEmail() && (isPublished() || isSuperAdmin());
 
       allow create: if isRvuEmail() && isNotSuspended()
+        && request.resource.data.createdBy == request.auth.uid
         && (
           (request.resource.data.sourceType == 'club'
             && isApprovedClubCore(request.resource.data.clubId))

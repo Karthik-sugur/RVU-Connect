@@ -1,7 +1,6 @@
-import { app, auth, db, functions, analytics } from "./firebase-init.js";
-import { getDoc, getDocs, addDoc, setDoc, updateDoc, deleteDoc, doc, collection, query, where, orderBy, limit, startAfter, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
+import { app, auth, db, analytics } from "./firebase-init.js";
+import { getDoc, getDocs, addDoc, setDoc, updateDoc, deleteDoc, doc, collection, collectionGroup, query, where, orderBy, limit, startAfter, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 import { onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, signOut } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
-import { httpsCallable } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-functions.js";
 import { handleFirebaseError } from "./errors.js";
 
 
@@ -58,20 +57,15 @@ async function rowsOrEmpty(label, promise) {
 let _cachedSuperAdminResult = null;
 
 async function hasSuperAdminGrant(user) {
-  if (!user?.uid || !user?.email) return false;
+  if (!user?.uid) return false;
   if (_cachedSuperAdminResult !== null) return _cachedSuperAdminResult;
-  const email = user.email.trim();
-  const [uidGrant, emailGrant] = await Promise.all([
-    getDoc(doc(db, "superAdmins", user.uid)).catch((err) => {
-      console.warn("Failed to check superAdmin uid:", err);
-      return null;
-    }),
-    getDoc(doc(db, "superAdmins", email)).catch((err) => {
-      console.warn("Failed to check superAdmin email:", err);
-      return null;
-    }),
-  ]);
-  _cachedSuperAdminResult = Boolean(uidGrant?.exists() || emailGrant?.exists());
+  try {
+    const uidGrant = await getDoc(doc(db, "superAdmins", user.uid));
+    _cachedSuperAdminResult = Boolean(uidGrant?.exists());
+  } catch (err) {
+    console.warn("Failed to check superAdmin uid:", err);
+    _cachedSuperAdminResult = false;
+  }
   return _cachedSuperAdminResult;
 }
 
@@ -156,24 +150,27 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
     const email = auth.currentUser.email;
     const uid = auth.currentUser.uid;
     const [savedRows, followRows, rsvpRows, applicationRows] = await Promise.all([
-      rowsOrEmpty("saved items", getDocs(collection(db, "users", uid, "savedItems"))),
-      rowsOrEmpty("followed clubs", getDocs(collection(db, "users", uid, "followedClubs"))),
-      rowsOrEmpty("event RSVPs", getDocs(collection(db, "users", uid, "rsvps"))),
-      rowsOrEmpty("project applications", getDocs(collection(db, "users", uid, "applications"))),
+      rowsOrEmpty("saved items", getDocs(query(collection(db, "users", uid, "savedItems"), limit(50)))),
+      rowsOrEmpty("followed clubs", getDocs(query(collection(db, "users", uid, "followedClubs"), limit(50)))),
+      rowsOrEmpty("event RSVPs", getDocs(query(collection(db, "users", uid, "rsvps"), limit(50)))),
+      rowsOrEmpty("project applications", getDocs(query(collection(db, "users", uid, "applications"), limit(50)))),
     ]);
-    let memberDocs = [];
-    const userClubIds = profile.clubIds || (profile.clubId ? [profile.clubId] : []);
-    for (const cId of userClubIds) {
-      const club = data.clubs.find(c => c.id === cId || c.slug === cId);
+    
+    // Single collection group query replacing N+1 lookups
+    const memberDocs = [];
+    const memberSnap = await getDocs(query(collectionGroup(db, "coreMembers"), where("uid", "==", uid), where("status", "==", "approved"))).catch(() => ({ docs: [] }));
+    for (const doc of memberSnap.docs) {
+      // The parent of a coreMembers doc is a subcollection, and its parent is the club doc
+      // e.g. clubs/{clubId}/coreMembers/{email}
+      const clubId = doc.ref.parent.parent?.id;
+      const club = data.clubs.find(c => c.id === clubId || c.slug === clubId);
       if (club) {
-        const memberSnap = await getDoc(doc(db, "clubs", club.id, "coreMembers", email));
-        if (memberSnap.exists() && memberSnap.data().status === "approved") {
-          memberDocs.push({ club, member: { id: memberSnap.id, ...memberSnap.data() } });
-        }
+        memberDocs.push({ club, member: { id: doc.id, ...doc.data() } });
       }
     }
+    
     data.clubAccesses = memberDocs;
-    data.clubAccess = memberDocs.find((entry) => entry?.member?.status === "approved") || null;
+    data.clubAccess = memberDocs[0] || null;
     data.savedItems = savedRows;
     data.followedClubs = followRows;
     data.rsvps = rsvpRows;
@@ -301,8 +298,11 @@ async function updateClubRegistration(clubId, registrationOpen) {
 }
 
 async function updateHostRequestStatus(requestId, status) {
-  const func = httpsCallable(functions, 'updateHostRequestStatus');
-  await func({ requestId, status });
+  await updateDoc(doc(db, "hostRequests", requestId), {
+    status,
+    updatedAt: serverTimestamp()
+  });
+  await logAudit("update-host-request", "hostRequests", requestId, status);
 }
 
 async function createEvent(payload) {
@@ -420,28 +420,48 @@ async function logAudit(action, collectionName, targetId, title = "") {
 
 async function grantPlatformRole({ email, uid, role }) {
   const normalizedEmail = email?.trim();
-  if (role === "superAdmin") {
-    const func = httpsCallable(functions, 'grantSuperAdmin');
-    await func({ email: normalizedEmail });
-    return;
-  }
-  if (role === "student") {
-    const func = httpsCallable(functions, 'revokeSuperAdmin');
-    await func({ email: normalizedEmail });
-    return;
-  }
   if (!uid) throw new Error("A Firebase Auth UID is required for user role updates.");
+  
+  if (role === "superAdmin") {
+    await setDoc(doc(db, "superAdmins", uid), {
+      email: normalizedEmail,
+      uid,
+      grantedAt: serverTimestamp(),
+      grantedBy: auth.currentUser?.uid
+    });
+    await updateUserRole(uid, "superAdmin");
+    await logAudit("grant-super-admin", "superAdmins", uid, normalizedEmail);
+    return;
+  }
+  
+  if (role === "student") {
+    await deleteDoc(doc(db, "superAdmins", uid));
+    await updateUserRole(uid, "student");
+    await logAudit("revoke-super-admin", "superAdmins", uid, normalizedEmail);
+    return;
+  }
+  
   await updateUserRole(uid, role || "student");
+  await logAudit("grant-role", "users", uid, role);
 }
 
 async function assignClubCoreRole(clubId, { email, name, role }) {
-  const func = httpsCallable(functions, 'updateClubMemberStatus');
-  await func({ clubId, targetEmail: email, action: 'approve' });
+  const normalizedEmail = email.trim().toLowerCase();
+  await setDoc(doc(db, "clubs", clubId, "coreMembers", normalizedEmail), {
+    email: normalizedEmail,
+    name: name || normalizedEmail.split("@")[0],
+    role: role || "core",
+    status: "approved",
+    assignedBy: auth.currentUser?.uid,
+    updatedAt: serverTimestamp()
+  }, { merge: true });
+  await logAudit("assign-club-core", "clubs", clubId, normalizedEmail);
 }
 
 async function removeClubCoreRole(clubId, email) {
-  const func = httpsCallable(functions, 'updateClubMemberStatus');
-  await func({ clubId, targetEmail: email, action: 'remove' });
+  const normalizedEmail = email.trim().toLowerCase();
+  await deleteDoc(doc(db, "clubs", clubId, "coreMembers", normalizedEmail));
+  await logAudit("remove-club-core", "clubs", clubId, normalizedEmail);
 }
 
 async function updateClubLeadership(clubId, data) {
@@ -472,7 +492,7 @@ async function updateClubProfile(clubId, data) {
 }
 
 async function deleteDocument(collectionName, docId) {
-  await firestoreDeleteDoc(doc(db, collectionName, docId));
+  await deleteDoc(doc(db, collectionName, docId));
   await logAudit("delete-document", collectionName, docId);
 }
 
@@ -631,8 +651,11 @@ async function flagContent(payload) {
 }
 
 async function toggleUserSuspension(uid, suspended) {
-  const func = httpsCallable(functions, 'suspendUser');
-  await func({ uid, suspend: suspended });
+  await updateDoc(doc(db, "users", uid), {
+    suspended,
+    updatedAt: serverTimestamp()
+  });
+  await logAudit("toggle-user-suspension", "users", uid, suspended ? "suspended" : "active");
 }
 
 async function getEventRSVPs(eventId) {
@@ -688,17 +711,34 @@ async function loadMore(collectionName) {
   return rows(snap);
 }
 
-async function loadAdminTab(tabName) {
-  if (!(await hasSuperAdminGrant(auth.currentUser))) return [];
-  switch (tabName) {
-    case "requests": return await rowsOrEmpty("host requests", getDocs(query(collection(db, "hostRequests"), limit(100))));
-    case "flags": return await rowsOrEmpty("moderation flags", getDocs(query(collection(db, "moderationFlags"), limit(100))));
-    case "users": return await rowsOrEmpty("users", getDocs(query(collection(db, "users"), limit(100))));
-    case "events": return await rowsOrEmpty("all events", getDocs(query(collection(db, "events"), limit(100))));
-    case "announcements": return await rowsOrEmpty("all announcements", getDocs(query(collection(db, "announcements"), limit(100))));
-    case "contentReviews": return await rowsOrEmpty("content reviews", getDocs(query(collection(db, "contentReviews"), limit(100))));
-    default: return [];
+async function loadAdminTab(tabName, lastDocId = null) {
+  if (!(await hasSuperAdminGrant(auth.currentUser))) return { docs: [], lastDocId: null };
+  
+  const map = {
+    requests: "hostRequests",
+    flags: "moderationFlags",
+    users: "users",
+    events: "events",
+    announcements: "announcements",
+    contentReviews: "contentReviews"
+  };
+  
+  const colName = map[tabName];
+  if (!colName) return { docs: [], lastDocId: null };
+
+  let q = query(collection(db, colName), limit(50));
+  if (lastDocId) {
+    const docSnap = await getDoc(doc(db, colName, lastDocId));
+    if (docSnap.exists()) {
+      q = query(collection(db, colName), startAfter(docSnap), limit(50));
+    }
   }
+  
+  const snap = await getDocs(q).catch(() => ({ docs: [] }));
+  return { 
+    docs: rows(snap), 
+    lastDocId: snap.docs.length > 0 ? snap.docs[snap.docs.length - 1].id : null 
+  };
 }
 
 window.RVUFirebase = {
