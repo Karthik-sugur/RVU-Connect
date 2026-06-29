@@ -10,7 +10,7 @@ export const CONFIG = {
   },
   appCheck: {
     debugToken: true, // self.FIREBASE_APPCHECK_DEBUG_TOKEN
-    reCaptchaKey: "6Ldummy_site_key_for_now_replace_later"
+    reCaptchaKey: "6LecNzwtAAAAALKoPE5_oR1otalznBFmPRfH1pDo"
   },
   features: {
     applicationsEnabled: true,
