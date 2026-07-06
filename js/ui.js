@@ -1136,7 +1136,7 @@ export function renderProfile() {
       <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid #e8e0d4;">
         <span style="font-size:14px;font-weight:600;color:#1a1a1a;font-family:inherit;">${escapeHtml(c.clubName || "Club")}</span>
         <div style="display:flex;gap:8px;">
-          <button style="background:none;border:1.5px solid #c8b89a;padding:4px 12px;font-size:12px;color:#5a4a3a;cursor:pointer;font-family:inherit;" data-action="nav-club" data-slug="${c.clubId || ""}">View →</button>
+          <button style="background:none;border:1.5px solid #c8b89a;padding:4px 12px;font-size:12px;color:#5a4a3a;cursor:pointer;font-family:inherit;" data-action="open-club" data-club="${c.clubId || ""}">View →</button>
           <button style="background:none;border:1.5px solid #c8b89a;padding:4px 12px;font-size:12px;color:#a09080;cursor:pointer;font-family:inherit;" data-action="unfollow-club" data-docid="${c.clubId || ""}" data-title="${escapeHtml(c.clubName || "")}">Unfollow</button>
         </div>
       </div>`).join("")
@@ -1166,7 +1166,7 @@ export function renderProfile() {
             ${badge(s.type || "item", typeColor)}
             <p style="font-size:14px;font-weight:500;color:#1a1a1a;margin:0;font-family:inherit;">${escapeHtml(s.title || "Saved")}</p>
           </div>`,
-          `<button style="background:none;border:1.5px solid #c8b89a;border-radius:0;padding:3px 12px;font-size:12px;color:#5a4a3a;cursor:pointer;font-family:inherit;">View →</button>`
+          `<button style="background:none;border:1.5px solid #c8b89a;border-radius:0;padding:3px 12px;font-size:12px;color:#5a4a3a;cursor:pointer;font-family:inherit;" data-action="open-${s.type}-detail" data-docid="${s.itemId || ""}">View →</button>`
         );
       }).join("")
     : `<p style="font-size:13px;color:#8a7a6a;margin:0;padding:8px 0;">Nothing saved yet.</p>`;
@@ -1260,6 +1260,7 @@ export function renderProfile() {
 
     </div>
     ${state.editProfileOpen ? renderEditProfileModal() : ""}
+    ${state._profileInterestsOpen ? renderProfileInterestsModal() : ""}
   `;
 }
 
