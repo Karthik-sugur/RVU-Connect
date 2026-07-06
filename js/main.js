@@ -2,7 +2,7 @@ import { ROLES, STATUSES, ROUTES } from "./constants.js";
 import { logger } from "./logger.js";
 import { validateEvent, validateAnnouncement, validateProject } from "./validation.js";
 
-import { promptUser, validateClubDraft } from './utils.js';
+import { promptUser, validateClubDraft, replaceCollection } from './utils.js';
 import { schools, interests, events, clubs, announcements, projects, state, defaultClubDraft, app } from './state.js';
 import { isClubCore, isSchoolRep, isSuperAdmin, canHost, activeClub, isAllowedRvuEmail, syncFirebaseData, enterAuthenticatedApp, enterDemoApp, handleSignOut, startFirebaseLogin } from './auth.js';
 import { render, renderAtTop, renderSearchResultsHtml } from './ui.js';
@@ -458,7 +458,7 @@ export async function handleAction(action, dataset) {
     if (!window.RVUFirebase || !isSuperAdmin() || !dataset.docid) return;
     if (!window.confirm("Delete this school record?")) return;
     await window.RVUFirebase.deleteDocument("schools", dataset.docid);
-    /* removed syncFirebaseData */
+    state.allSchools = state.allSchools.filter(s => s.id !== dataset.docid);
   }
   if (action === "admin-assign-core") {
     if (!window.RVUFirebase || !isSuperAdmin() || !dataset.docid) return;
@@ -508,7 +508,8 @@ export async function handleAction(action, dataset) {
     if (!window.RVUFirebase || !isSuperAdmin() || !dataset.docid) return;
     if (!window.confirm("Delete this club? This cannot be undone.")) return;
     await window.RVUFirebase.deleteDocument("clubs", dataset.docid);
-    /* removed syncFirebaseData */
+    state.allClubs = state.allClubs.filter(c => c.id !== dataset.docid);
+    replaceCollection(clubs, clubs.filter(c => c.id !== dataset.docid));
   }
   if (action === "admin-create-event") {
     if (!window.RVUFirebase || !isSuperAdmin()) return;
@@ -531,7 +532,7 @@ export async function handleAction(action, dataset) {
       tags: [],
       status: "published",
     });
-    state.events.unshift(newEv);
+    events.unshift(newEv);
     if (state.allEvents) state.allEvents.unshift(newEv);
   }
   if (action === "admin-create-announcement") {
@@ -548,7 +549,7 @@ export async function handleAction(action, dataset) {
       time: "Just now",
       status: "published",
     });
-    state.announcements.unshift(newAnn);
+    announcements.unshift(newAnn);
     if (state.allAnnouncements) state.allAnnouncements.unshift(newAnn);
   }
   if (action === "open-create-project") {
@@ -585,7 +586,7 @@ export async function handleAction(action, dataset) {
       status: "open",
       score: 0,
     });
-    state.projects.unshift(newProj);
+    projects.unshift(newProj);
     state.createProjectOpen = false;
     renderAtTop();
     return;
@@ -649,7 +650,7 @@ export async function handleAction(action, dataset) {
       schoolName: state.host.school || "",
     };
     const newEvent = await window.RVUFirebase.createEvent(payload);
-    state.events.unshift(newEvent);
+    events.unshift(newEvent);
     if(state.allEvents) state.allEvents.unshift(newEvent);
     state.createEventOpen = false;
     /* removed syncFirebaseData */
@@ -710,7 +711,7 @@ export async function handleAction(action, dataset) {
     }
 
     const newAnn = await window.RVUFirebase.createAnnouncement(payload);
-    state.announcements.unshift(newAnn);
+    announcements.unshift(newAnn);
     if(state.allAnnouncements) state.allAnnouncements.unshift(newAnn);
     state.createAnnouncementOpen = false;
     /* removed syncFirebaseData */
@@ -720,38 +721,39 @@ export async function handleAction(action, dataset) {
   if (action === "admin-unpublish-event") {
     if (!window.RVUFirebase || !isSuperAdmin() || !dataset.docid) return;
     await window.RVUFirebase.updateEventStatus(dataset.docid, "draft");
-    state.events = state.events.filter(e => e.id !== dataset.docid);
+    replaceCollection(events, events.filter(e => e.id !== dataset.docid));
     if(state.allEvents) { const e = state.allEvents.find(x => x.id === dataset.docid); if(e) e.status = "draft"; }
   }
   if (action === "admin-publish-event") {
     if (!window.RVUFirebase || !isSuperAdmin() || !dataset.docid) return;
     await window.RVUFirebase.updateEventStatus(dataset.docid, "published");
-    if(state.allEvents) { const e = state.allEvents.find(x => x.id === dataset.docid); if(e) { e.status = "published"; state.events.unshift(e); } }
+    if(state.allEvents) { const e = state.allEvents.find(x => x.id === dataset.docid); if(e) { e.status = "published"; events.unshift(e); } }
   }
   if (action === "admin-unpublish-announcement") {
     if (!window.RVUFirebase || !isSuperAdmin() || !dataset.docid) return;
     await window.RVUFirebase.updateAnnouncementStatus(dataset.docid, "draft");
-    /* removed syncFirebaseData */
+    replaceCollection(announcements, announcements.filter(a => a.id !== dataset.docid));
+    if(state.allAnnouncements) { const a = state.allAnnouncements.find(x => x.id === dataset.docid); if(a) a.status = "draft"; }
   }
   if (action === "admin-delete-event") {
     if (!window.RVUFirebase || !isSuperAdmin() || !dataset.docid) return;
     if (!window.confirm("Delete this event permanently?")) return;
     await window.RVUFirebase.deleteDocument("events", dataset.docid);
-    state.events = state.events.filter(e => e.id !== dataset.docid);
+    replaceCollection(events, events.filter(e => e.id !== dataset.docid));
     if(state.allEvents) state.allEvents = state.allEvents.filter(e => e.id !== dataset.docid);
   }
   if (action === "admin-delete-announcement") {
     if (!window.RVUFirebase || !isSuperAdmin() || !dataset.docid) return;
     if (!window.confirm("Delete this announcement permanently?")) return;
     await window.RVUFirebase.deleteDocument("announcements", dataset.docid);
-    state.announcements = state.announcements.filter(a => a.id !== dataset.docid);
+    replaceCollection(announcements, announcements.filter(a => a.id !== dataset.docid));
     if(state.allAnnouncements) state.allAnnouncements = state.allAnnouncements.filter(a => a.id !== dataset.docid);
   }
   if (action === "admin-delete-project") {
     if (!window.RVUFirebase || !isSuperAdmin() || !dataset.docid) return;
     if (!window.confirm("Delete this project permanently?")) return;
     await window.RVUFirebase.deleteDocument("projects", dataset.docid);
-    state.projects = state.projects.filter(p => p.id !== dataset.docid);
+    replaceCollection(projects, projects.filter(p => p.id !== dataset.docid));
   }
   if (action === "load-more") {
     if (!window.RVUFirebase) return;
@@ -761,9 +763,9 @@ export async function handleAction(action, dataset) {
       window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "No more items to load.", type: "info" } }));
       return;
     }
-    if (collectionName === "events") state.events = [...state.events, ...newItems];
-    else if (collectionName === "announcements") state.announcements = [...state.announcements, ...newItems];
-    else if (collectionName === "projects") state.projects = [...state.projects, ...newItems];
+    if (collectionName === "events") replaceCollection(events, [...events, ...newItems]);
+    else if (collectionName === "announcements") replaceCollection(announcements, [...announcements, ...newItems]);
+    else if (collectionName === "projects") replaceCollection(projects, [...projects, ...newItems]);
     renderAtTop();
     return;
   }
@@ -806,7 +808,7 @@ export async function handleAction(action, dataset) {
     if (!window.RVUFirebase || !dataset.docid) return;
     const newStatus = dataset.status === "open" ? "closed" : "open";
     await window.RVUFirebase.updateDocument("projects", dataset.docid, { status: newStatus });
-    const proj = state.projects.find(p => p.id === dataset.docid);
+    const proj = projects.find(p => p.id === dataset.docid);
     if (proj) proj.status = newStatus;
     if (state.myApplications) {
       state.myApplications.forEach(a => { if (a.projectId === dataset.docid) a.projectStatus = newStatus; });
@@ -819,7 +821,7 @@ export async function handleAction(action, dataset) {
     if (!window.confirm(`Delete "${dataset.title}"? This cannot be undone.`)) return;
     await window.RVUFirebase.deleteDocument("projects", dataset.docid);
     state.selectedProjectId = null;
-    state.projects = state.projects.filter(p => p.id !== dataset.docid);
+    replaceCollection(projects, projects.filter(p => p.id !== dataset.docid));
     renderAtTop();
     return;
   }
@@ -883,9 +885,22 @@ export async function handleAction(action, dataset) {
       description,
       imageUrl: imageUrl || null,
     });
+    const ann = announcements.find(a => a.id === state.editAnnouncementId);
+    if (ann) {
+      ann.title = title;
+      ann.description = description;
+      ann.imageUrl = imageUrl || null;
+    }
+    if (state.allAnnouncements) {
+      const annAll = state.allAnnouncements.find(a => a.id === state.editAnnouncementId);
+      if (annAll) {
+        annAll.title = title;
+        annAll.description = description;
+        annAll.imageUrl = imageUrl || null;
+      }
+    }
     state.editAnnouncementOpen = false;
     state.editAnnouncementId = null;
-    /* removed syncFirebaseData */
     renderAtTop();
     return;
   }
@@ -896,7 +911,18 @@ export async function handleAction(action, dataset) {
       status: "cancelled",
       cancelled: true,
     });
-    /* removed syncFirebaseData */
+    const ev = events.find(e => e.id === dataset.docid);
+    if (ev) {
+      ev.status = "cancelled";
+      ev.cancelled = true;
+    }
+    if (state.allEvents) {
+      const evAll = state.allEvents.find(e => e.id === dataset.docid);
+      if (evAll) {
+        evAll.status = "cancelled";
+        evAll.cancelled = true;
+      }
+    }
     renderAtTop();
     return;
   }
@@ -942,9 +968,30 @@ export async function handleAction(action, dataset) {
       link: link || null,
       posterUrl: posterUrl || null,
     });
+    const ev = events.find(e => e.id === state.editEventId);
+    if (ev) {
+      ev.title = title;
+      ev.description = description;
+      ev.date = date;
+      ev.time = time;
+      ev.location = location;
+      ev.link = link || null;
+      ev.posterUrl = posterUrl || null;
+    }
+    if (state.allEvents) {
+      const evAll = state.allEvents.find(e => e.id === state.editEventId);
+      if (evAll) {
+        evAll.title = title;
+        evAll.description = description;
+        evAll.date = date;
+        evAll.time = time;
+        evAll.location = location;
+        evAll.link = link || null;
+        evAll.posterUrl = posterUrl || null;
+      }
+    }
     state.editEventOpen = false;
     state.editEventId = null;
-    // state patching for edit event relies on re-fetching or we manually patch. Since this is an edit, a full reload might be overkill, but let\'s just update the local item if possible. Actually, we will just leave it or fetch it.
     renderAtTop();
     return;
   }
