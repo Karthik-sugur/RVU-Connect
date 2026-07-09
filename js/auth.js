@@ -107,6 +107,18 @@ export async function syncFirebaseData() {
     state.host.approved = true;
     state.onboardingStep = null;
   }
+  if (profile.role !== "superAdmin" && data.schoolAccess) {
+    state.role = "school-rep";
+    state.host.schoolAccesses = data.schoolAccesses || [data.schoolAccess];
+    state.host.school = data.schoolAccess.schoolId || profile.schoolScope || state.host.school;
+    state.host.roleTitle = data.schoolAccess.representative.role || "representative";
+    state.host.name = data.schoolAccess.representative.name || state.host.name;
+    state.host.facultyDesignation = data.schoolAccess.representative.facultyDesignation || "";
+    state.host.facultyDepartment = data.schoolAccess.representative.facultyDepartment || "";
+    state.host.isFaculty = data.schoolAccess.representative.facultyDesignation !== "Student Rep";
+    state.host.approved = true;
+    state.onboardingStep = null;
+  }
   state.dataLoaded = true;
   state.dataLoading = false;
 }
@@ -218,4 +230,3 @@ export async function startFirebaseLogin() {
     window.alert(error.message || "Firebase sign-in failed.");
   }
 }
-

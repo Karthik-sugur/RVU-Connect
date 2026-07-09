@@ -144,10 +144,13 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
     myApplications: [],
     siteSettings: settingsRows,
     clubAccess: null,
+    clubAccesses: [],
+    schoolAccess: null,
+    schoolAccesses: [],
   };
 
   if (auth.currentUser?.email) {
-    const email = auth.currentUser.email;
+    const email = auth.currentUser.email.trim().toLowerCase();
     const uid = auth.currentUser.uid;
     const [savedRows, followRows, rsvpRows, applicationRows] = await Promise.all([
       rowsOrEmpty("saved items", getDocs(query(collection(db, "users", uid, "savedItems"), limit(50)))),
@@ -155,22 +158,78 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
       rowsOrEmpty("event RSVPs", getDocs(query(collection(db, "users", uid, "rsvps"), limit(50)))),
       rowsOrEmpty("project applications", getDocs(query(collection(db, "users", uid, "applications"), limit(50)))),
     ]);
+    const ownHostRequests = await rowsOrEmpty("host requests", getDocs(query(collection(db, "hostRequests"), where("uid", "==", uid), limit(50))));
     
     // Single collection group query replacing N+1 lookups
     const memberDocs = [];
-    const memberSnap = await getDocs(query(collectionGroup(db, "coreMembers"), where("uid", "==", uid), where("status", "==", "approved"))).catch(() => ({ docs: [] }));
-    for (const doc of memberSnap.docs) {
+    const memberSnaps = await Promise.all([
+      getDocs(query(collectionGroup(db, "coreMembers"), where("uid", "==", uid))).catch(() => ({ docs: [] })),
+      getDocs(query(collectionGroup(db, "coreMembers"), where("email", "==", email))).catch(() => ({ docs: [] })),
+    ]);
+    const seenMemberRefs = new Set();
+    for (const doc of memberSnaps.flatMap((snap) => snap.docs)) {
+      if (seenMemberRefs.has(doc.ref.path)) continue;
+      seenMemberRefs.add(doc.ref.path);
+      const member = { id: doc.id, ...doc.data() };
+      if (member.status !== "approved") continue;
       // The parent of a coreMembers doc is a subcollection, and its parent is the club doc
       // e.g. clubs/{clubId}/coreMembers/{email}
       const clubId = doc.ref.parent.parent?.id;
       const club = data.clubs.find(c => c.id === clubId || c.slug === clubId);
       if (club) {
-        memberDocs.push({ club, member: { id: doc.id, ...doc.data() } });
+        memberDocs.push({ club, member });
       }
     }
+
+    const schoolRepSnaps = await Promise.all([
+      getDocs(query(collectionGroup(db, "representatives"), where("uid", "==", uid))).catch(() => ({ docs: [] })),
+      getDocs(query(collectionGroup(db, "representatives"), where("email", "==", email))).catch(() => ({ docs: [] })),
+    ]);
+    const schoolAccesses = [];
+    const seenRepRefs = new Set();
+    for (const doc of schoolRepSnaps.flatMap((snap) => snap.docs)) {
+      if (seenRepRefs.has(doc.ref.path)) continue;
+      seenRepRefs.add(doc.ref.path);
+      const representative = { id: doc.id, ...doc.data() };
+      if (representative.status !== "approved") continue;
+      const schoolId = doc.ref.parent.parent?.id;
+      schoolAccesses.push({ schoolId, representative });
+    }
     
+    for (const request of ownHostRequests.filter((item) => item.status === "approved")) {
+      if (request.type === "clubCore" && request.clubId && !memberDocs.some((access) => access.club.id === request.clubId || access.club.slug === request.clubId)) {
+        const club = data.clubs.find((item) => item.id === request.clubId || item.slug === request.clubId);
+        if (club) {
+          const member = {
+            email,
+            name: request.name || profile.name || email,
+            role: request.roleTitle || "core",
+            status: "approved",
+            uid,
+          };
+          memberDocs.push({ club, member });
+        }
+      }
+      if (request.type === "schoolRepresentative" && request.schoolId && !schoolAccesses.some((access) => access.schoolId === request.schoolId)) {
+        schoolAccesses.push({
+          schoolId: request.schoolId,
+          representative: {
+            email,
+            name: request.name || profile.name || email,
+            role: request.roleTitle || "representative",
+            facultyDesignation: request.facultyDesignation || "",
+            facultyDepartment: request.facultyDepartment || "",
+            status: "approved",
+            uid,
+          },
+        });
+      }
+    }
     data.clubAccesses = memberDocs;
     data.clubAccess = memberDocs[0] || null;
+    data.schoolAccesses = schoolAccesses;
+    data.schoolAccess = schoolAccesses[0] || null;
+    data.hostRequests = ownHostRequests;
     data.savedItems = savedRows;
     data.followedClubs = followRows;
     data.rsvps = rsvpRows;
@@ -204,9 +263,10 @@ async function submitHostRequest(payload) {
   const ref = await addDoc(collection(db, "hostRequests"), request);
 
   if (payload.type == "clubCore" && payload.clubId) {
-    await setDoc(doc(db, "clubs", payload.clubId, "coreMembers", user.email), {
+    const normalizedEmail = user.email.trim().toLowerCase();
+    await setDoc(doc(db, "clubs", payload.clubId, "coreMembers", normalizedEmail), {
       uid: user.uid,
-      email: user.email,
+      email: normalizedEmail,
       name: payload.name,
       role: payload.roleTitle || "core",
       status: "pending",
@@ -217,7 +277,8 @@ async function submitHostRequest(payload) {
 
   if (payload.type == "schoolRepresentative" && payload.schoolId) {
     await setDoc(doc(db, "schools", payload.schoolId, "representatives", user.uid), {
-      email: user.email,
+      uid: user.uid,
+      email: user.email.trim().toLowerCase(),
       name: payload.name,
       role: payload.roleTitle || "representative",
       status: "pending",
@@ -298,10 +359,39 @@ async function updateClubRegistration(clubId, registrationOpen) {
 }
 
 async function updateHostRequestStatus(requestId, status) {
-  await updateDoc(doc(db, "hostRequests", requestId), {
+  const requestRef = doc(db, "hostRequests", requestId);
+  const requestSnap = await getDoc(requestRef);
+  const requestData = requestSnap.exists() ? requestSnap.data() : {};
+  await updateDoc(requestRef, {
     status,
     updatedAt: serverTimestamp()
   });
+
+  const normalizedEmail = requestData.email?.trim().toLowerCase();
+  if (requestData.type === "clubCore" && requestData.clubId && normalizedEmail) {
+    await setDoc(doc(db, "clubs", requestData.clubId, "coreMembers", normalizedEmail), {
+      uid: requestData.uid,
+      email: normalizedEmail,
+      name: requestData.name || normalizedEmail.split("@")[0],
+      role: requestData.roleTitle || "core",
+      status,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+  }
+
+  if (requestData.type === "schoolRepresentative" && requestData.schoolId && requestData.uid) {
+    await setDoc(doc(db, "schools", requestData.schoolId, "representatives", requestData.uid), {
+      uid: requestData.uid,
+      email: normalizedEmail || requestData.email || "",
+      name: requestData.name || requestData.email || requestData.uid,
+      role: requestData.roleTitle || "representative",
+      facultyDesignation: requestData.facultyDesignation || "",
+      facultyDepartment: requestData.facultyDepartment || "",
+      status,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+  }
+
   await logAudit("update-host-request", "hostRequests", requestId, status);
 }
 
@@ -573,7 +663,7 @@ async function unfollowClub(clubId) {
   const user = auth.currentUser;
   if (!user) return;
   const ref = doc(db, "users", user.uid, "followedClubs", clubId);
-  await firestoreDeleteDoc(ref);
+  await deleteDoc(ref);
 }
 
 async function rsvpEvent(eventId, payload = {}) {
