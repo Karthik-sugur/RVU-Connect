@@ -9,8 +9,9 @@ export const CONFIG = {
     measurementId: "G-1G6Z0B4SY0",
   },
   appCheck: {
-    debugToken: true, // self.FIREBASE_APPCHECK_DEBUG_TOKEN
-    reCaptchaKey: "6LecNzwtAAAAALKoPE5_oR1otalznBFmPRfH1pDo"
+    debugToken: true,
+    reCaptchaKey: "6LecNzwtAAAAALKoPE5_oR1otalznBFmPRfH1pDo",
+    productionHosts: ["rvu-connect.vercel.app"]
   },
   features: {
     applicationsEnabled: true,

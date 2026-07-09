@@ -8,7 +8,18 @@ import { CONFIG } from "./config.js";
 
 export const app = initializeApp(CONFIG.firebase);
 
-self.FIREBASE_APPCHECK_DEBUG_TOKEN = CONFIG.appCheck.debugToken;
+function shouldUseAppCheckDebugToken(hostname) {
+  const localHosts = new Set(["localhost", "127.0.0.1", "::1"]);
+  const productionHosts = new Set(CONFIG.appCheck.productionHosts || []);
+  const isLocal = localHosts.has(hostname);
+  const isVercelPreview = hostname.endsWith(".vercel.app") && !productionHosts.has(hostname);
+  return Boolean(CONFIG.appCheck.debugToken && (isLocal || isVercelPreview));
+}
+
+if (shouldUseAppCheckDebugToken(window.location.hostname)) {
+  self.FIREBASE_APPCHECK_DEBUG_TOKEN = CONFIG.appCheck.debugToken;
+}
+
 export const appCheck = initializeAppCheck(app, {
   provider: new ReCaptchaV3Provider(CONFIG.appCheck.reCaptchaKey),
   isTokenAutoRefreshEnabled: true
