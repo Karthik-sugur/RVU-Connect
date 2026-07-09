@@ -27,4 +27,4 @@ def process_file(filepath):
         
     print("Done escaping UI")
 
-process_file("/Users/lenovo/Documents/RVU-Connect-main/js/ui.js")
+process_file("./js/ui.js")
