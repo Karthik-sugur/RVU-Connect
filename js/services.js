@@ -2,10 +2,11 @@ import { app, auth, db, analytics } from "./firebase-init.js";
 import { getDoc, getDocs, addDoc, setDoc, updateDoc, deleteDoc, doc, collection, collectionGroup, query, where, orderBy, limit, startAfter, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 import { onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, signOut } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import { handleFirebaseError } from "./errors.js";
+import { EMAIL_DOMAIN } from "./constants.js";
 
 
 function isRvuEmail(email) {
-  return typeof email === "string" && email.trim().toLowerCase().endsWith(RVU_EMAIL_DOMAIN);
+  return typeof email === "string" && email.trim().toLowerCase().endsWith(EMAIL_DOMAIN);
 }
 
 async function requireRvuUser(user) {
@@ -403,9 +404,8 @@ async function createEvent(payload) {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
-  return { id: ref.id, ...payload, createdAt: new Date().toISOString() };
   await logAudit("create-event", "events", ref.id, payload.title);
-  return ref.id;
+  return { id: ref.id, ...payload, createdAt: new Date().toISOString() };
 }
 
 async function createAnnouncement(payload) {
@@ -416,9 +416,8 @@ async function createAnnouncement(payload) {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
-  return { id: ref.id, ...payload, createdAt: new Date().toISOString() };
   await logAudit("create-announcement", "announcements", ref.id, payload.title);
-  return ref.id;
+  return { id: ref.id, ...payload, createdAt: new Date().toISOString() };
 }
 
 async function createProject(payload) {
@@ -430,9 +429,8 @@ async function createProject(payload) {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
-  return { id: ref.id, ...payload, createdAt: new Date().toISOString() };
   await logAudit("create-project", "projects", ref.id, payload.title);
-  return ref.id;
+  return { id: ref.id, ...payload, createdAt: new Date().toISOString() };
 }
 
 /* ── Admin CRUD operations ── */
