@@ -846,7 +846,7 @@ export const demoCampusData = {
     { id: "demo-user-admin", name: "Super Admin Demo", email: "admin@rvu.edu.in", role: "superAdmin", school: "RVU" },
     { id: "demo-user-student1", name: "Anika Sharma", email: "anika.sharma@rvu.edu.in", role: "student", school: "School of Business", interests: ["Marketing", "Business"] },
     { id: "demo-user-student2", name: "Rohan Das", email: "rohan.das@rvu.edu.in", role: "student", school: "School of Law", interests: ["Law", "Policy"] },
-
+  ],
   contentReviews: [
     { id: "demo-review-speaker", title: "External speaker poster copy", collection: "events", targetId: "demo-event-founder-office-hours", note: "Confirm speaker designation before publishing final poster.", status: "pending" },
     { id: "demo-review-health", title: "Health resource wording", collection: "projects", targetId: "demo-project-wellness-map", note: "Check support contact names and escalation language.", status: "pending" },
