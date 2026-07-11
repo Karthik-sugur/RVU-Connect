@@ -111,7 +111,7 @@ export function renderPendingAdminAccess() {
           <div class="admin-checklist">
             <span>Cannot create events until approved</span>
             <span>Cannot post announcements until approved</span>
-            <span>Can be approved by ${isClubCore() ? "the club president or super admin" : "super admin"}</span>
+            <span>Can be approved by super admin</span>
           </div>
         </article>
       </div>
@@ -178,7 +178,7 @@ export function renderClubAdmin() {
   const club = isSuperAdmin() ? activeClub() : activeClub();
   const clubEvents = events.filter((event) => event.club === club.name || event.host === club.name);
   const clubAnnouncements = announcements.filter((item) => item.clubId === club.id || item.clubId === club.slug || item.source === club.name);
-  const canManageCore = isSuperAdmin() || ["president", "owner"].includes((state.host.roleTitle || "").toLowerCase());
+  const canManageCore = isSuperAdmin();
   return `
     <section class="admin-workspace">
       <div class="admin-summary">

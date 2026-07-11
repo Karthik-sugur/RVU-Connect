@@ -51,11 +51,7 @@ export async function syncFirebaseData() {
   state.dataLoading = true;
   render();
   const profile = await window.RVUFirebase.ensureUserProfile(state.authUser);
-  if (profile.suspended) {
-    window.alert("Your account has been suspended by a super admin.");
-    await window.RVUFirebase.signOut();
-    return;
-  }
+
   const roleMap = {
     superAdmin: "admin",
     clubCore: "club-core",
