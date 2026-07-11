@@ -93,7 +93,6 @@ const state = {
     allAnnouncements: [],
     allClubs: [],
     allSchools: [],
-    auditLogs: [],
     contentReviews: [],
     siteSettings: [],
     projects: [],
@@ -110,8 +109,6 @@ const state = {
     review: defaultReview(),
   },
   toast: "",
-  auditLastDocId: null,
-  auditSearch: "",
 };
 
 const app = document.querySelector("#admin-app");
@@ -221,8 +218,6 @@ function downloadCSV(filename, rows) {
 
 async function loadAdminData() {
   const data = applyDemoCampusData(await window.RVUFirebase.loadCampusData({ superAdmin: true }));
-  const auditRes = await window.RVUFirebase.loadAuditLogs();
-  state.auditLastDocId = auditRes.lastDocId;
   state.data = {
     hostRequests: data.hostRequests || [],
     moderationFlags: data.moderationFlags || [],
@@ -231,7 +226,6 @@ async function loadAdminData() {
     allAnnouncements: data.allAnnouncements || [],
     allClubs: data.allClubs || [],
     allSchools: data.allSchools || [],
-    auditLogs: auditRes.docs || [],
     contentReviews: data.contentReviews || [],
     siteSettings: data.siteSettings || [],
     projects: data.projects || [],
@@ -354,7 +348,6 @@ function renderRail() {
     ["roles", "Roles"],
     ["settings", "Settings"],
     ["analytics", "Analytics"],
-    ["audit", "Audit"],
     ["users", "Users"],
     ["moderation", "Moderation"],
   ];
@@ -388,7 +381,6 @@ function tabTitle() {
     roles: "Role Manager",
     settings: "Site Settings",
     analytics: "Analytics",
-    audit: "Audit Log",
     users: "User Directory",
     moderation: "Moderation",
   };
@@ -423,7 +415,6 @@ function renderTab() {
   if (state.tab === "roles") return renderRoles();
   if (state.tab === "settings") return renderSettings();
   if (state.tab === "analytics") return renderAnalytics();
-  if (state.tab === "audit") return renderAudit();
   if (state.tab === "users") return renderUsers();
   if (state.tab === "moderation") return renderModeration();
   return renderOverview();
@@ -717,11 +708,7 @@ function renderUsers() {
 }
 
 function userRow(user) {
-  const suspendedTxt = user.suspended ? " · [SUSPENDED]" : "";
-  const toggleLabel = user.suspended ? "Unsuspend" : "Suspend";
-  return row(user.name || user.email || user.id, `${user.email || "No email"} · ${user.role || "student"} · ${user.school || "No school"}${suspendedTxt}`, `
-    <button class="mini-btn ${user.suspended ? "" : "danger"}" data-action="toggle-suspend-user" data-id="${user.id}" data-suspended="${user.suspended ? 'true' : 'false'}">${toggleLabel}</button>
-  `);
+  return row(user.name || user.email || user.id, `${user.email || "No email"} · ${user.role || "student"} · ${user.school || "No school"}`, "");
 }
 
 function renderReview() {
@@ -815,28 +802,6 @@ function analyticsCard(title, value, copy) {
   return `<article class="panel"><p class="eyebrow">${title}</p><h3>${value}</h3><p class="empty">${copy}</p></article>`;
 }
 
-function renderAudit() {
-  const filteredLogs = state.data.auditLogs.filter(item => {
-    if (!state.auditSearch) return true;
-    const s = state.auditSearch.toLowerCase();
-    return (item.action || "").toLowerCase().includes(s) || (item.adminEmail || item.actorEmail || "").toLowerCase().includes(s);
-  });
-  return `
-    <article class="panel wide">
-      <p class="eyebrow">Immutable activity</p>
-      <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 16px;">
-        <h3>Audit log</h3>
-        <div style="display: flex; gap: 8px;">
-          <input type="text" data-field="auditSearch" value="${escapeHtml(state.auditSearch || "")}" placeholder="Search action or email..." style="padding: 6px; border: 1px solid #ccc; border-radius: 4px;" />
-          <button class="btn secondary" data-action="search-audit">Search</button>
-        </div>
-      </div>
-      ${listRows(filteredLogs, (item) => simpleRow(item.action || "Action", `${item.collection || "collection"} · ${item.title || item.targetId || ""} · ${item.adminEmail || item.actorEmail || ""}`), "No audit entries match.")}
-      ${state.auditLastDocId ? `<div style="margin-top: 16px; text-align: center;"><button class="btn secondary" data-action="load-more-audit">Load More</button></div>` : ""}
-    </article>
-  `;
-}
-
 function renderModeration() {
   return `
     <article class="panel wide">
@@ -882,7 +847,7 @@ function setByPath(path, value) {
   if (group && key && state.forms[group]) state.forms[group][key] = value;
   if (path === "authEmail") state.authEmail = value;
   if (path === "authPassword") state.authPassword = value;
-  if (path === "auditSearch") state.auditSearch = value;
+  if (path === "settings.bannedWords") state.forms.settings.bannedWords = value;
 }
 
 function getClubValidationError() {
@@ -1121,16 +1086,6 @@ async function handleAction(action, id) {
     downloadCSV("rvuconnect_users.csv", state.data.allUsers);
     return;
   }
-  if (action === "toggle-suspend-user") {
-    const user = state.data.allUsers.find(u => u.id === id);
-    if (!user) return;
-    const newStatus = !user.suspended;
-    if (!window.confirm(`${newStatus ? 'Suspend' : 'Unsuspend'} ${user.email || user.name}?`)) return;
-    await window.RVUFirebase.toggleUserSuspension(id, newStatus);
-    await refresh();
-    showToast(`User ${newStatus ? 'suspended' : 'unsuspended'}.`);
-    return;
-  }
   if (action === "export-rsvps") {
     const rsvps = await window.RVUFirebase.getEventRSVPs(id);
     downloadCSV(`event_${id}_rsvps.csv`, rsvps);
@@ -1141,17 +1096,8 @@ async function handleAction(action, id) {
     downloadCSV(`project_${id}_applicants.csv`, apps);
     return;
   }
-  if (action === "load-more-audit") {
-    const res = await window.RVUFirebase.loadAuditLogs(state.auditLastDocId);
-    state.data.auditLogs.push(...res.docs);
-    state.auditLastDocId = res.lastDocId;
-    render();
-    return;
-  }
-  if (action === "search-audit") {
-    const searchEl = document.querySelector('[data-field="auditSearch"]');
-    state.auditSearch = searchEl ? searchEl.value.trim() : "";
-    render();
+  if (action === "toggle-suspend-user") {
+    // Legacy action ignored
     return;
   }
   if (action === "load-more-admin-tab") {

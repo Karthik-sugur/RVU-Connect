@@ -1,0 +1,29 @@
+{
+  "name": "rvu-connect-main",
+  "version": "1.0.0",
+  "description": "<p align=\"center\">   <img src=\"assets/rv-university-logo-gold.png\" alt=\"RV University Logo\" width=\"120\" /> </p>",
+  "main": "admin.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Karthik-sugur/RVU-Connect.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Karthik-sugur/RVU-Connect/issues"
+  },
+  "homepage": "https://github.com/Karthik-sugur/RVU-Connect#readme",
+  "dependencies": {
+    "@firebase/rules-unit-testing": "^5.0.1",
+    "firebase": "^12.16.0",
+    "firebase-tools": "^12.9.1"
+  }
+}

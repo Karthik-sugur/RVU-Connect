@@ -475,12 +475,12 @@ export async function handleAction(action, dataset) {
     await updateClubLeadershipFromPrompt(dataset.docid, club);
   }
   if (action === "club-update-leadership") {
-    if (!window.RVUFirebase || !dataset.docid) return;
+    if (!window.RVUFirebase || !isSuperAdmin() || !dataset.docid) return;
     const club = activeClub();
     await updateClubLeadershipFromPrompt(dataset.docid, club);
   }
   if (action === "club-assign-core") {
-    if (!window.RVUFirebase || !dataset.docid) return;
+    if (!window.RVUFirebase || !isSuperAdmin() || !dataset.docid) return;
     const email = await promptUser("Core member RVU email (@rvu.edu.in)");
     if (!isAllowedRvuEmail(email)) return window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Core email must end with @rvu.edu.in.", type: "info" } }));
     const name = await promptUser("Core member name") || email;
@@ -497,7 +497,7 @@ export async function handleAction(action, dataset) {
     /* removed syncFirebaseData */
   }
   if (action === "club-remove-core") {
-    if (!window.RVUFirebase || !dataset.docid) return;
+    if (!window.RVUFirebase || !isSuperAdmin() || !dataset.docid) return;
     const email = await promptUser("Core member email to remove");
     if (!email) return;
     if (!window.confirm(`Remove ${email} from this club core?`)) return;

@@ -103,10 +103,6 @@ function ruleTraceFor(path, operation, payload = {}) {
     rule = "match /siteSettings/{settingId}";
     checks.push("write requires isSuperAdmin()");
     category = "role mismatch";
-  } else if (path.startsWith("auditLogs/")) {
-    rule = "match /auditLogs/{logId}";
-    checks.push("create/read require isSuperAdmin(); update/delete always denied");
-    category = "role mismatch or disallowed operation";
   } else if (path.startsWith("schools/") && path.includes("/representatives/")) {
     rule = "match /schools/{schoolId}/representatives/{uid}";
     checks.push("create requires representative uid path segment to equal auth.uid");
@@ -120,22 +116,19 @@ function ruleTraceFor(path, operation, payload = {}) {
     category = "role mismatch";
   } else if (path.startsWith("clubs/") && path.includes("/coreMembers/")) {
     rule = "match /clubs/{clubId}/coreMembers/{memberEmail}";
-    checks.push("self create requires memberEmail path segment to equal auth email");
-    checks.push("self create payload.status must equal 'pending'");
-    checks.push("self create payload.email must equal auth email");
-    checks.push("president create/update/delete requires approved president/owner role and permanent != true");
-    checks.push("super admin bypasses these role-specific checks");
-    category = "incorrect document path, incorrect payload, or role mismatch";
+    checks.push("all writes require isSuperAdmin()");
+    checks.push("read allowed for super admin, the member themselves, or any approved core member");
+    category = "role mismatch";
   } else if (path.startsWith("clubs/")) {
     rule = "match /clubs/{clubId}";
     checks.push("create/delete require isSuperAdmin()");
-    checks.push("non-admin update must be approved club core/president and changed fields must match hasOnly lists");
-    category = "role mismatch or extra fields";
+    checks.push("non-admin update requires isApprovedClubCore(clubId) and unchanged createdAt/createdBy");
+    category = "role mismatch";
   } else if (path.startsWith("events/") && path.includes("/rsvps/")) {
     rule = "match /events/{eventId}/rsvps/{uid}";
     checks.push("write uid path segment must equal auth.uid");
-    checks.push("auth email must end with @rvu.edu.in and user must not be suspended");
-    category = "ownership mismatch or missing users/{uid} document suspension state";
+    checks.push("auth email must end with @rvu.edu.in");
+    category = "ownership mismatch";
   } else if (path.startsWith("events/")) {
     rule = "match /events/{eventId}";
     checks.push("create requires payload.createdBy == auth.uid");
@@ -174,9 +167,9 @@ function ruleTraceFor(path, operation, payload = {}) {
     category = "ownership mismatch, incorrect payload, or role mismatch";
   } else if (path.startsWith("moderationFlags/")) {
     rule = "match /moderationFlags/{flagId}";
-    checks.push("create requires RVU email and non-suspended user");
+    checks.push("create requires RVU email");
     checks.push("read/update/delete require isSuperAdmin()");
-    category = "missing users/{uid} document suspension state or role mismatch";
+    category = "role mismatch";
   }
 
   return { rule, checks, suspectedCause: category, operation, path, payload };
@@ -388,7 +381,6 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
     allAnnouncements: [],
     allClubs: [],
     allSchools: [],
-    auditLogs: [],
     contentReviews: [],
     savedItems: [],
     followedClubs: [],
@@ -512,32 +504,6 @@ async function submitHostRequest(payload) {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
-  const ref = await tracedAddDoc(collection(db, "hostRequests"), request);
-
-  if (payload.type == "clubCore" && payload.clubId) {
-    await tracedSetDoc(doc(db, "clubs", payload.clubId, "coreMembers", user.email), {
-      uid: user.uid,
-      email: user.email,
-      name: payload.name,
-      role: payload.roleTitle || "core",
-      status: "pending",
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-  }
-
-  if (payload.type == "schoolRepresentative" && payload.schoolId) {
-    await tracedSetDoc(doc(db, "schools", payload.schoolId, "representatives", user.uid), {
-      uid: user.uid,
-      email: user.email.trim().toLowerCase(),
-      name: payload.name,
-      role: payload.roleTitle || "representative",
-      status: "pending",
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-  }
-
   return ref.id;
 }
 
@@ -564,15 +530,6 @@ async function submitMultiClubCoreRequest(clubIds, { name, roleTitle }) {
       updatedAt: serverTimestamp(),
     };
     const ref = await tracedAddDoc(collection(db, "hostRequests"), request);
-    await tracedSetDoc(doc(db, "clubs", clubId, "coreMembers", user.email), {
-      uid: user.uid,
-      email: user.email,
-      name: memberName,
-      role: memberRole,
-      status: "pending",
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
     results.push(ref.id);
   }
   return results;
@@ -644,8 +601,6 @@ async function updateHostRequestStatus(requestId, status) {
       updatedAt: serverTimestamp(),
     }, { merge: true });
   }
-
-  await logAudit("update-host-request", "hostRequests", requestId, status);
 }
 
 async function createEvent(payload) {
@@ -656,7 +611,6 @@ async function createEvent(payload) {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
-  await logAudit("create-event", "events", ref.id, payload.title);
   return { id: ref.id, ...payload, createdAt: new Date().toISOString() };
 }
 
@@ -668,7 +622,6 @@ async function createAnnouncement(payload) {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
-  await logAudit("create-announcement", "announcements", ref.id, payload.title);
   return { id: ref.id, ...payload, createdAt: new Date().toISOString() };
 }
 
@@ -682,7 +635,6 @@ async function createProject(payload) {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
-  await logAudit("create-project", "projects", ref.id, payload.title);
   return { id: ref.id, ...payload, createdAt: new Date().toISOString() };
 }
 
@@ -729,7 +681,6 @@ async function createClub(payload) {
     updatedAt: serverTimestamp(),
   })));
 
-  await logAudit("create-club", "clubs", ref.id, payload.name);
   return ref.id;
 }
 
@@ -741,25 +692,9 @@ async function createSchool(payload) {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
-  await logAudit("create-school", "schools", ref.id, payload.name);
   return ref.id;
 }
 
-async function logAudit(action, collectionName, targetId, title = "") {
-  if (!auth.currentUser) return;
-  if (!(await hasSuperAdminGrant(auth.currentUser))) return;
-  await tracedAddDoc(collection(db, "auditLogs"), {
-    action,
-    collection: collectionName,
-    targetId,
-    title,
-    adminEmail: auth.currentUser.email,
-    adminId: auth.currentUser.uid,
-    createdAt: serverTimestamp(),
-  }).catch((err) => {
-    console.warn("Failed to log audit action:", err);
-  });
-}
 
 async function grantPlatformRole({ email, uid, role }) {
   const normalizedEmail = email?.trim();
@@ -774,19 +709,16 @@ async function grantPlatformRole({ email, uid, role }) {
       grantedBy: auth.currentUser?.uid
     });
     await updateUserRole(uid, "superAdmin");
-    await logAudit("grant-super-admin", "superAdmins", uid, normalizedEmail);
     return;
   }
   
   if (role === "student") {
     await tracedDeleteDoc(doc(db, "superAdmins", uid));
     await updateUserRole(uid, "student");
-    await logAudit("revoke-super-admin", "superAdmins", uid, normalizedEmail);
     return;
   }
   
   await updateUserRole(uid, role || "student");
-  await logAudit("grant-role", "users", uid, role);
 }
 
 async function assignClubCoreRole(clubId, { email, name, role }) {
@@ -799,13 +731,11 @@ async function assignClubCoreRole(clubId, { email, name, role }) {
     assignedBy: auth.currentUser?.uid,
     updatedAt: serverTimestamp()
   }, { merge: true });
-  await logAudit("assign-club-core", "clubs", clubId, normalizedEmail);
 }
 
 async function removeClubCoreRole(clubId, email) {
   const normalizedEmail = email.trim().toLowerCase();
   await tracedDeleteDoc(doc(db, "clubs", clubId, "coreMembers", normalizedEmail));
-  await logAudit("remove-club-core", "clubs", clubId, normalizedEmail);
 }
 
 async function updateClubLeadership(clubId, data) {
@@ -832,13 +762,11 @@ async function updateClubProfile(clubId, data) {
     ...data,
     updatedAt: serverTimestamp(),
   });
-  await logAudit("update-club-profile", "clubs", clubId, data.name || "");
 }
 
 async function deleteDocument(collectionName, docId) {
   requireOneOf(collectionName, ["schools", "clubs", "events", "announcements", "projects"], "Deleted collection");
   await tracedDeleteDoc(doc(db, collectionName, docId));
-  await logAudit("delete-document", collectionName, docId);
 }
 
 async function updateDocument(collectionName, docId, data) {
@@ -871,7 +799,6 @@ async function updateSiteSetting(settingId, data) {
     updatedBy: auth.currentUser?.uid,
     updatedAt: serverTimestamp(),
   }, { merge: true });
-  await logAudit("update-site-setting", "siteSettings", settingId);
 }
 
 async function createContentReview(payload) {
@@ -882,7 +809,6 @@ async function createContentReview(payload) {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
-  await logAudit("create-content-review", "contentReviews", ref.id, payload.title);
   return ref.id;
 }
 
@@ -893,7 +819,6 @@ async function updateContentReviewStatus(reviewId, status) {
     reviewedAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
-  await logAudit("review-content", "contentReviews", reviewId, status);
 }
 
 async function saveItem({ itemId, type, title }) {
@@ -982,7 +907,6 @@ async function updateProjectApplicationStatus(projectId, userId, status) {
     updatedAt: serverTimestamp(),
   });
   await batch.commit();
-  await logAudit("project-application-status", "projects", projectId, status);
 }
 
 async function flagContent(payload) {
@@ -999,14 +923,6 @@ async function flagContent(payload) {
   return ref.id;
 }
 
-async function toggleUserSuspension(uid, suspended) {
-  await tracedUpdateDoc(doc(db, "users", uid), {
-    suspended,
-    updatedAt: serverTimestamp()
-  });
-  await logAudit("toggle-user-suspension", "users", uid, suspended ? "suspended" : "active");
-}
-
 async function getEventRSVPs(eventId) {
   const snap = await getDocs(collection(db, "events", eventId, "rsvps"));
   return rows(snap);
@@ -1017,29 +933,6 @@ async function getProjectApplicants(projectId) {
   return rows(snap);
 }
 
-async function loadAuditLogs(lastDocId = null) {
-  let q = query(
-    collection(db, "auditLogs"),
-    orderBy("createdAt", "desc"),
-    limit(50)
-  );
-  if (lastDocId) {
-    const docSnap = await getDoc(doc(db, "auditLogs", lastDocId));
-    if (docSnap.exists()) {
-      q = query(
-        collection(db, "auditLogs"),
-        orderBy("createdAt", "desc"),
-        startAfter(docSnap),
-        limit(50)
-      );
-    }
-  }
-  const snap = await getDocs(q);
-  return { 
-    docs: rows(snap), 
-    lastDocId: snap.docs.length > 0 ? snap.docs[snap.docs.length - 1].id : null 
-  };
-}
 
 async function loadMore(collectionName) {
   let q;
@@ -1135,10 +1028,8 @@ window.RVUFirebase = {
   updateSiteSetting,
   updateUserRole,
   removeClubCoreRole,
-  toggleUserSuspension,
   getEventRSVPs,
   getProjectApplicants,
-  loadAuditLogs,
   signInWithGoogle,
   signOut: () => {
     _cachedSuperAdminResult = null;

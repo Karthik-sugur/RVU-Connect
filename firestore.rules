@@ -12,23 +12,6 @@ service cloud.firestore {
         && request.auth.token.email.matches('.*@rvu\\.edu\\.in$');
     }
 
-    function userDoc(uid) {
-      return get(/databases/$(database)/documents/users/$(uid));
-    }
-
-    function myUserDoc() {
-      return userDoc(request.auth.uid);
-    }
-
-    function myRole() {
-      return myUserDoc().data.role;
-    }
-
-    function isNotSuspended() {
-      return !exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.suspended != true;
-    }
-
     function isSuperAdmin() {
       return isRvuEmail()
         && (
@@ -44,11 +27,6 @@ service cloud.firestore {
       return isRvuEmail()
         && exists(/databases/$(database)/documents/clubs/$(clubId)/coreMembers/$(request.auth.token.email))
         && get(/databases/$(database)/documents/clubs/$(clubId)/coreMembers/$(request.auth.token.email)).data.status == 'approved';
-    }
-
-    function isClubPresident(clubId) {
-      return isApprovedClubCore(clubId)
-        && get(/databases/$(database)/documents/clubs/$(clubId)/coreMembers/$(request.auth.token.email)).data.role in ['president', 'owner'];
     }
 
     function isApprovedSchoolRep(schoolId) {
@@ -70,17 +48,17 @@ service cloud.firestore {
     }
 
     match /users/{uid} {
-      allow create: if isRvuEmail() && isNotSuspended()
+      allow create: if isRvuEmail()
         && createsOwnDoc(uid)
         && request.resource.data.role == 'student'
         && request.resource.data.email == request.auth.token.email;
 
       allow read: if isSuperAdmin() || (isRvuEmail() && createsOwnDoc(uid));
 
-      allow update: if isSuperAdmin() || (isRvuEmail() && isNotSuspended()
+      allow update: if isSuperAdmin() || (isRvuEmail()
         && createsOwnDoc(uid)
-        && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['name', 'school', 'year', 'interests', 'onboardingComplete', 'clubIds', 'updatedAt']));
+        && unchanged('role')
+        && unchanged('email'));
 
       allow delete: if isSuperAdmin();
 
@@ -112,13 +90,8 @@ service cloud.firestore {
       allow create, update, delete: if isSuperAdmin();
     }
 
-    match /auditLogs/{logId} {
-      allow create, read: if isSuperAdmin();
-      allow update, delete: if false;
-    }
-
     match /contentReviews/{reviewId} {
-      allow create: if isRvuEmail() && isNotSuspended();
+      allow create: if isRvuEmail();
       allow read, update, delete: if isSuperAdmin();
     }
 
@@ -128,86 +101,38 @@ service cloud.firestore {
 
       match /representatives/{uid} {
         allow read: if isSuperAdmin() || createsOwnDoc(uid) || isApprovedSchoolRep(schoolId);
-
-        allow create: if isRvuEmail() && isNotSuspended()
-          && createsOwnDoc(uid)
-          && request.resource.data.status == 'pending'
-          && request.resource.data.email == request.auth.token.email;
-
-        allow update: if isSuperAdmin();
-        allow delete: if isSuperAdmin();
+        allow create, update, delete: if isSuperAdmin();
       }
     }
 
     match /clubs/{clubId} {
       allow read: if isRvuEmail() && (resource.data.status == 'approved' || isSuperAdmin() || isApprovedClubCore(clubId));
-      allow create, update, delete: if isSuperAdmin();
+      allow create, delete: if isSuperAdmin();
 
-      allow update: if isApprovedClubCore(clubId) && isNotSuspended()
-        && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['description', 'doing', 'highlights', 'joinLink', 'registrationOpen', 'updatedAt']);
-
-      allow update: if isClubPresident(clubId) && isNotSuspended()
-        && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly([
-            'description',
-            'doing',
-            'highlights',
-            'joinLink',
-            'registrationOpen',
-            'currentPresidentName',
-            'currentPresidentEmail',
-            'facultyAdvisorName',
-            'facultyAdvisorEmail',
-            'updatedAt'
-          ]);
+      allow update: if isSuperAdmin() || (isApprovedClubCore(clubId) && unchanged('createdAt') && unchanged('createdBy'));
 
       match /coreMembers/{memberEmail} {
         allow read: if isSuperAdmin()
           || (isRvuEmail() && memberEmail == request.auth.token.email)
           || isApprovedClubCore(clubId);
-
-        allow create: if isSuperAdmin()
-          || (
-            isClubPresident(clubId)
-            && request.resource.data.permanent != true
-          )
-          || (
-            isRvuEmail()
-            && memberEmail == request.auth.token.email
-            && request.resource.data.status == 'pending'
-            && request.resource.data.email == request.auth.token.email
-          );
-
-        allow update: if isSuperAdmin()
-          || (
-            isClubPresident(clubId)
-            && resource.data.permanent != true
-            && request.resource.data.permanent != true
-          );
-        allow delete: if isSuperAdmin()
-          || (isClubPresident(clubId) && resource.data.permanent != true);
+          
+        allow create, update, delete: if isSuperAdmin();
       }
     }
 
     match /events/{eventId} {
       allow read: if isRvuEmail() && (isPublished() || isSuperAdmin());
 
-      allow create: if isRvuEmail() && isNotSuspended()
-        && request.resource.data.createdBy == request.auth.uid
+      allow create: if isRvuEmail()
         && (
-          (request.resource.data.hostType == 'club'
-            && isApprovedClubCore(request.resource.data.clubId))
-          ||
-          (request.resource.data.hostType == 'school'
-            && isApprovedSchoolRep(request.resource.data.schoolId))
-          ||
-          isSuperAdmin()
+          (request.resource.data.hostType == 'club' && isApprovedClubCore(request.resource.data.clubId))
+          || (request.resource.data.hostType == 'school' && isApprovedSchoolRep(request.resource.data.schoolId))
+          || isSuperAdmin()
         );
 
       allow update: if isSuperAdmin()
-        || (resource.data.hostType == 'club' && isApprovedClubCore(resource.data.clubId) && unchanged('createdBy') && unchanged('createdAt'))
-        || (resource.data.hostType == 'school' && isApprovedSchoolRep(resource.data.schoolId) && unchanged('createdBy') && unchanged('createdAt'));
+        || (resource.data.hostType == 'club' && isApprovedClubCore(resource.data.clubId) && unchanged('createdAt'))
+        || (resource.data.hostType == 'school' && isApprovedSchoolRep(resource.data.schoolId) && unchanged('createdAt'));
         
       allow delete: if isSuperAdmin()
         || (resource.data.hostType == 'club' && isApprovedClubCore(resource.data.clubId))
@@ -215,28 +140,23 @@ service cloud.firestore {
 
       match /rsvps/{uid} {
         allow read: if isSuperAdmin() || createsOwnDoc(uid);
-        allow create, update, delete: if isRvuEmail() && isNotSuspended() && createsOwnDoc(uid);
+        allow create, update, delete: if isRvuEmail() && createsOwnDoc(uid);
       }
     }
 
     match /announcements/{announcementId} {
       allow read: if isRvuEmail() && (isPublished() || isSuperAdmin());
 
-      allow create: if isRvuEmail() && isNotSuspended()
-        && request.resource.data.createdBy == request.auth.uid
+      allow create: if isRvuEmail()
         && (
-          (request.resource.data.sourceType == 'club'
-            && isApprovedClubCore(request.resource.data.clubId))
-          ||
-          (request.resource.data.sourceType == 'school'
-            && isApprovedSchoolRep(request.resource.data.schoolId))
-          ||
-          isSuperAdmin()
+          (request.resource.data.sourceType == 'club' && isApprovedClubCore(request.resource.data.clubId))
+          || (request.resource.data.sourceType == 'school' && isApprovedSchoolRep(request.resource.data.schoolId))
+          || isSuperAdmin()
         );
 
       allow update: if isSuperAdmin()
-        || (resource.data.sourceType == 'club' && isApprovedClubCore(resource.data.clubId) && unchanged('createdBy') && unchanged('createdAt'))
-        || (resource.data.sourceType == 'school' && isApprovedSchoolRep(resource.data.schoolId) && unchanged('createdBy') && unchanged('createdAt'));
+        || (resource.data.sourceType == 'club' && isApprovedClubCore(resource.data.clubId) && unchanged('createdAt'))
+        || (resource.data.sourceType == 'school' && isApprovedSchoolRep(resource.data.schoolId) && unchanged('createdAt'));
         
       allow delete: if isSuperAdmin()
         || (resource.data.sourceType == 'club' && isApprovedClubCore(resource.data.clubId))
@@ -246,12 +166,12 @@ service cloud.firestore {
     match /projects/{projectId} {
       allow read: if isRvuEmail();
 
-      allow create: if isRvuEmail() && isNotSuspended()
+      allow create: if isRvuEmail()
         && request.resource.data.ownerId == request.auth.uid
         && request.resource.data.status in ['open', 'closed'];
 
       allow update: if isSuperAdmin()
-        || (isRvuEmail() && resource.data.ownerId == request.auth.uid && unchanged('ownerId') && unchanged('createdBy') && unchanged('createdAt'));
+        || (isRvuEmail() && resource.data.ownerId == request.auth.uid && unchanged('ownerId') && unchanged('createdAt'));
         
       allow delete: if isSuperAdmin()
         || (isRvuEmail() && resource.data.ownerId == request.auth.uid);
@@ -261,7 +181,7 @@ service cloud.firestore {
           || createsOwnDoc(uid)
           || get(/databases/$(database)/documents/projects/$(projectId)).data.ownerId == request.auth.uid;
 
-        allow create: if isRvuEmail() && isNotSuspended()
+        allow create: if isRvuEmail()
           && createsOwnDoc(uid)
           && request.resource.data.userId == request.auth.uid
           && request.resource.data.status == 'pending';
@@ -276,7 +196,7 @@ service cloud.firestore {
     }
 
     match /hostRequests/{requestId} {
-      allow create: if isRvuEmail() && isNotSuspended()
+      allow create: if isRvuEmail()
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.status == 'pending'
         && request.resource.data.type in ['clubCore', 'schoolRepresentative', 'newClub'];
@@ -288,7 +208,7 @@ service cloud.firestore {
     }
 
     match /moderationFlags/{flagId} {
-      allow create: if isRvuEmail() && isNotSuspended();
+      allow create: if isRvuEmail();
       allow read, update, delete: if isSuperAdmin();
     }
 

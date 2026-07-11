@@ -846,12 +846,7 @@ export const demoCampusData = {
     { id: "demo-user-admin", name: "Super Admin Demo", email: "admin@rvu.edu.in", role: "superAdmin", school: "RVU" },
     { id: "demo-user-student1", name: "Anika Sharma", email: "anika.sharma@rvu.edu.in", role: "student", school: "School of Business", interests: ["Marketing", "Business"] },
     { id: "demo-user-student2", name: "Rohan Das", email: "rohan.das@rvu.edu.in", role: "student", school: "School of Law", interests: ["Law", "Policy"] },
-  ],
-  auditLogs: [
-    { id: "demo-audit-club", action: "create-club", collection: "clubs", targetId: "demo-club-ai-forge", title: "AI Forge", adminEmail: "admin@rvu.edu.in" },
-    { id: "demo-audit-event", action: "create-event", collection: "events", targetId: "demo-event-ai-agent-night", title: "AI Agent Build Night", adminEmail: "admin@rvu.edu.in" },
-    { id: "demo-audit-notice", action: "create-announcement", collection: "announcements", targetId: "demo-ann-expo", title: "Club Orientation Expo stall registrations", adminEmail: "admin@rvu.edu.in" },
-  ],
+
   contentReviews: [
     { id: "demo-review-speaker", title: "External speaker poster copy", collection: "events", targetId: "demo-event-founder-office-hours", note: "Confirm speaker designation before publishing final poster.", status: "pending" },
     { id: "demo-review-health", title: "Health resource wording", collection: "projects", targetId: "demo-project-wellness-map", note: "Check support contact names and escalation language.", status: "pending" },
@@ -912,7 +907,6 @@ export function applyDemoCampusData(data = {}) {
     allAnnouncements: preferLive(data.allAnnouncements, announcements),
     allClubs: preferLive(data.allClubs, clubs),
     allSchools: preferLive(data.allSchools, demo.schools),
-    auditLogs: preferLive(data.auditLogs, demo.auditLogs),
     contentReviews: preferLive(data.contentReviews, demo.contentReviews),
     savedItems: preferLive(data.savedItems, demo.savedItems),
     followedClubs: preferLive(data.followedClubs, demo.followedClubs),
