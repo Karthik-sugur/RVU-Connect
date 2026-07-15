@@ -396,11 +396,12 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
   if (auth.currentUser?.email) {
     const email = auth.currentUser.email.trim().toLowerCase();
     const uid = auth.currentUser.uid;
-    const [savedRows, followRows, rsvpRows, applicationRows] = await Promise.all([
+    const [savedRows, followRows, rsvpRows, applicationRows, clubAppRows] = await Promise.all([
       rowsOrEmpty("saved items", getDocs(query(collection(db, "users", uid, "savedItems"), limit(50)))),
       rowsOrEmpty("followed clubs", getDocs(query(collection(db, "users", uid, "followedClubs"), limit(50)))),
       rowsOrEmpty("event RSVPs", getDocs(query(collection(db, "users", uid, "rsvps"), limit(50)))),
       rowsOrEmpty("project applications", getDocs(query(collection(db, "users", uid, "applications"), limit(50)))),
+      rowsOrEmpty("club applications", getDocs(query(collection(db, "clubApplications"), where("uid", "==", uid), limit(20)))),
     ]);
     const ownHostRequests = await rowsOrEmpty("host requests", getDocs(query(collection(db, "hostRequests"), where("uid", "==", uid), limit(50))));
     
@@ -478,6 +479,7 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
     data.followedClubs = followRows;
     data.rsvps = rsvpRows;
     data.myApplications = applicationRows;
+    data.clubApplications = clubAppRows;
   }
 
   if (superAdmin) {
@@ -504,6 +506,7 @@ async function submitHostRequest(payload) {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
+  const ref = await tracedAddDoc(collection(db, "hostRequests"), request);
   return ref.id;
 }
 
@@ -589,12 +592,13 @@ async function updateHostRequestStatus(requestId, status) {
     }, { merge: true });
   }
 
-  if (requestData.type === "schoolRepresentative" && requestData.schoolId && requestData.uid) {
+  if ((requestData.type === "schoolRepresentative" || requestData.type === "faculty") && requestData.schoolId && requestData.uid) {
     await tracedSetDoc(doc(db, "schools", requestData.schoolId, "representatives", requestData.uid), {
       uid: requestData.uid,
       email: normalizedEmail || requestData.email || "",
       name: requestData.name || requestData.email || requestData.uid,
-      role: requestData.roleTitle || "representative",
+      role: requestData.roleTitle || (requestData.type === "faculty" ? "faculty" : "representative"),
+      type: requestData.type || "schoolRepresentative",
       facultyDesignation: requestData.facultyDesignation || "",
       facultyDepartment: requestData.facultyDepartment || "",
       status,
@@ -878,6 +882,7 @@ async function applyToProject(projectId, payload = {}) {
     userId: user.uid,
     email: user.email,
     name: payload.name || user.displayName || user.email,
+    contactNumber: payload.contactNumber || "",
     note: payload.note || "",
     status: "pending",
     createdAt: serverTimestamp(),
@@ -929,8 +934,101 @@ async function getEventRSVPs(eventId) {
 }
 
 async function getProjectApplicants(projectId) {
-  const snap = await getDocs(collection(db, "projects", projectId, "applications"));
+  const snap = await getDocs(query(collection(db, "projects", projectId, "applications")));
   return rows(snap);
+}
+
+// ── Club Application functions ──
+
+async function submitClubApplication(clubId) {
+  const user = auth.currentUser;
+  if (!user) throw new Error("Sign in first.");
+
+  const email = user.email.trim().toLowerCase();
+  const uid = user.uid;
+
+  // Check for duplicate active (pending) application to the same club
+  const dupSnap = await getDocs(query(
+    collection(db, "clubApplications"),
+    where("uid", "==", uid),
+    where("clubId", "==", clubId),
+    where("status", "==", "pending"),
+    limit(1)
+  ));
+  if (!dupSnap.empty) {
+    throw new Error("You already have a pending application for this club.");
+  }
+
+  // Enforce max 5 active (pending) applications
+  const activeSnap = await getDocs(query(
+    collection(db, "clubApplications"),
+    where("uid", "==", uid),
+    where("status", "==", "pending"),
+    limit(6)
+  ));
+  if (activeSnap.size >= 5) {
+    throw new Error("You can have at most 5 pending Club Core applications at a time.");
+  }
+
+  const userSnap = await getDoc(doc(db, "users", uid));
+  const name = userSnap.exists() ? (userSnap.data().name || user.displayName || email.split("@")[0]) : (user.displayName || email.split("@")[0]);
+
+  const ref = await tracedAddDoc(collection(db, "clubApplications"), {
+    uid,
+    email,
+    name,
+    clubId,
+    status: "pending",
+    createdAt: serverTimestamp(),
+  });
+  return { id: ref.id, uid, email, name, clubId, status: "pending" };
+}
+
+async function withdrawClubApplication(applicationId) {
+  await tracedUpdateDoc(doc(db, "clubApplications", applicationId), {
+    status: "withdrawn",
+    updatedAt: serverTimestamp(),
+  });
+}
+
+async function loadClubPendingApplications(clubId) {
+  const snap = await getDocs(query(
+    collection(db, "clubApplications"),
+    where("clubId", "==", clubId),
+    where("status", "==", "pending"),
+    limit(50)
+  ));
+  return rows(snap);
+}
+
+async function approveClubApplication(applicationId, applicationData) {
+  const { uid, email, name, clubId } = applicationData;
+  if (!clubId || !email) throw new Error("Missing clubId or email in application data.");
+
+  const batch = tracedWriteBatch("approveClubApplication");
+  // Update application status
+  batch.update(doc(db, "clubApplications", applicationId), {
+    status: "approved",
+    updatedAt: serverTimestamp(),
+  });
+  // Add to club coreMembers
+  batch.set(doc(db, "clubs", clubId, "coreMembers", email.trim().toLowerCase()), {
+    uid: uid || "",
+    email: email.trim().toLowerCase(),
+    name: name || email.split("@")[0],
+    role: "core",
+    status: "approved",
+    approvedBy: auth.currentUser?.uid || "",
+    updatedAt: serverTimestamp(),
+  }, { merge: true });
+  await batch.commit();
+}
+
+async function rejectClubApplication(applicationId) {
+  await tracedUpdateDoc(doc(db, "clubApplications", applicationId), {
+    status: "rejected",
+    updatedAt: serverTimestamp(),
+  });
 }
 
 
@@ -1014,6 +1112,11 @@ window.RVUFirebase = {
   submitHostRequest,
   submitMultiClubCoreRequest,
   submitNewClubCreationRequest,
+  submitClubApplication,
+  withdrawClubApplication,
+  loadClubPendingApplications,
+  approveClubApplication,
+  rejectClubApplication,
   unfollowClub,
   updateAnnouncementStatus,
   updateClub,
@@ -1036,3 +1139,4 @@ window.RVUFirebase = {
     return signOut(auth);
   },
 };
+

@@ -1027,19 +1027,6 @@ export async function handleAction(action, dataset) {
     window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "RSVP saved.", type: "info" } }));
     return;
   }
-  if (action === "apply-project") {
-    if (!window.RVUFirebase || !dataset.docid) return;
-    const note = await promptUser("Short application note optional") || "";
-    state.myApplications = [...(state.myApplications || []), { projectId: dataset.docid, title: dataset.title || "", status: "pending", id: dataset.docid }];
-    render();
-    await window.RVUFirebase.applyToProject(dataset.docid, {
-      title: dataset.title || "",
-      name: state.user.name || state.authUser?.displayName || "",
-      note,
-    });
-    window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Application submitted.", type: "info" } }));
-    return;
-  }
   if (action === "flag-content") {
     if (!window.RVUFirebase || !dataset.docid) return;
     const reason = await promptUser("Why are you reporting this?");
@@ -1119,6 +1106,240 @@ export async function handleAction(action, dataset) {
     render();
     return;
   }
+  if (action === "open-club-apply-modal") {
+    state._clubApplyModalOpen = true;
+    renderAtTop();
+    return;
+  }
+  if (action === "close-club-apply-modal") {
+    state._clubApplyModalOpen = false;
+    renderAtTop();
+    return;
+  }
+  if (action === "submit-club-application") {
+    if (!window.RVUFirebase) return;
+    const select = document.getElementById("club-apply-select");
+    const clubId = select?.value;
+    if (!clubId) return;
+    
+    try {
+      const app = await window.RVUFirebase.submitClubApplication(clubId);
+      state.clubApplications = [app, ...(state.clubApplications || [])];
+      state._clubApplyModalOpen = false;
+      renderAtTop();
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Club application submitted.", type: "info" } }));
+    } catch (e) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: e.message || "Error submitting application.", type: "error" } }));
+    }
+    return;
+  }
+  if (action === "withdraw-club-application") {
+    if (!window.RVUFirebase || !dataset.docid) return;
+    if (!window.confirm("Are you sure you want to withdraw this application?")) return;
+    
+    try {
+      await window.RVUFirebase.withdrawClubApplication(dataset.docid);
+      const app = state.clubApplications.find(a => a.id === dataset.docid);
+      if (app) app.status = "withdrawn";
+      renderAtTop();
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Application withdrawn.", type: "info" } }));
+    } catch (e) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: e.message || "Error withdrawing.", type: "error" } }));
+    }
+    return;
+  }
+  
+  if (action === "start-school-rep-apply") {
+    state.onboardingStep = "host-info";
+    state._onboardingIntent = "school-rep";
+    renderAtTop();
+    return;
+  }
+
+  if (action === "open-faculty-apply-modal") {
+    state._facultyApplyModalOpen = true;
+    renderAtTop();
+    return;
+  }
+  if (action === "close-faculty-apply-modal") {
+    state._facultyApplyModalOpen = false;
+    renderAtTop();
+    return;
+  }
+  if (action === "submit-faculty-application") {
+    if (!window.RVUFirebase) return;
+    const name = document.getElementById("facultyName")?.value?.trim();
+    const email = document.getElementById("facultyEmail")?.value?.trim();
+    const schoolId = document.getElementById("faculty-school")?.value;
+    const designation = document.getElementById("faculty-designation")?.value;
+    
+    if (!name || !email || !schoolId || !designation) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "All fields are required.", type: "info" } }));
+      return;
+    }
+    
+    try {
+      await window.RVUFirebase.submitHostRequest({
+        type: "faculty",
+        name,
+        email,
+        schoolId,
+        facultyDesignation: designation,
+      });
+      state._facultyApplyModalOpen = false;
+      renderAtTop();
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Faculty application submitted for review.", type: "info" } }));
+    } catch (e) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: e.message || "Error submitting.", type: "error" } }));
+    }
+    return;
+  }
+
+  if (action === "load-club-applicants") {
+    if (!window.RVUFirebase || !dataset.club) return;
+    try {
+      const apps = await window.RVUFirebase.loadClubPendingApplications(dataset.club);
+      state.clubApplicants = apps;
+      state._clubApplicantsLoaded = true;
+      renderAtTop();
+    } catch (e) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Failed to load applications.", type: "error" } }));
+    }
+    return;
+  }
+  if (action === "approve-club-application") {
+    if (!window.RVUFirebase || !dataset.docid) return;
+    try {
+      await window.RVUFirebase.approveClubApplication(dataset.docid, {
+        uid: dataset.uid,
+        email: dataset.email,
+        name: dataset.name,
+        clubId: dataset.club,
+      });
+      state.clubApplicants = state.clubApplicants.filter(a => a.id !== dataset.docid);
+      renderAtTop();
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Application approved.", type: "info" } }));
+    } catch (e) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Error approving.", type: "error" } }));
+    }
+    return;
+  }
+  if (action === "reject-club-application") {
+    if (!window.RVUFirebase || !dataset.docid) return;
+    if (!window.confirm("Reject this application?")) return;
+    try {
+      await window.RVUFirebase.rejectClubApplication(dataset.docid);
+      state.clubApplicants = state.clubApplicants.filter(a => a.id !== dataset.docid);
+      renderAtTop();
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Application rejected.", type: "info" } }));
+    } catch (e) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Error rejecting.", type: "error" } }));
+    }
+    return;
+  }
+
+  if (action === "open-project-apply") {
+    state._projectApplyDocId = dataset.docid;
+    state._projectApplyTitle = dataset.title || "Project";
+    renderAtTop();
+    return;
+  }
+  if (action === "close-project-apply") {
+    state._projectApplyDocId = null;
+    state._projectApplyTitle = "";
+    renderAtTop();
+    return;
+  }
+  if (action === "submit-project-application") {
+    if (!window.RVUFirebase || !state._projectApplyDocId) return;
+    const name = document.getElementById("pa-name")?.value?.trim();
+    const contactNumber = document.getElementById("pa-phone")?.value?.trim();
+    const note = document.getElementById("pa-note")?.value?.trim();
+    
+    if (!name) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Name is required.", type: "info" } }));
+      return;
+    }
+    
+    try {
+      await window.RVUFirebase.applyToProject(state._projectApplyDocId, {
+        title: state._projectApplyTitle,
+        name,
+        contactNumber,
+        note,
+      });
+      state.myApplications = [...(state.myApplications || []), { 
+        projectId: state._projectApplyDocId, 
+        title: state._projectApplyTitle, 
+        status: "pending", 
+        id: state._projectApplyDocId 
+      }];
+      state._projectApplyDocId = null;
+      renderAtTop();
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Application submitted.", type: "info" } }));
+    } catch (e) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: e.message || "Error submitting.", type: "error" } }));
+    }
+    return;
+  }
+
+  if (action === "open-project-applicants") {
+    if (!dataset.docid) return;
+    state._projectApplicantsDocId = dataset.docid;
+    state._projectApplicants = [];
+    state._projectApplicantsLoading = true;
+    renderAtTop();
+    
+    if (window.RVUFirebase) {
+      window.RVUFirebase.getProjectApplicants(dataset.docid).then(apps => {
+        if (state._projectApplicantsDocId === dataset.docid) {
+          state._projectApplicants = apps;
+          state._projectApplicantsLoading = false;
+          renderAtTop();
+        }
+      }).catch(e => {
+        console.error("Failed to load applicants", e);
+        if (state._projectApplicantsDocId === dataset.docid) {
+          state._projectApplicantsLoading = false;
+          renderAtTop();
+          window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Failed to load applicants.", type: "error" } }));
+        }
+      });
+    }
+    return;
+  }
+  if (action === "close-project-applicants") {
+    state._projectApplicantsDocId = null;
+    state._projectApplicants = [];
+    renderAtTop();
+    return;
+  }
+  if (action === "download-applicants-csv") {
+    const apps = state._projectApplicants || [];
+    if (!apps.length) return;
+    
+    const headers = ["Name", "Email", "Phone", "Applied", "Note"];
+    const escapeCsv = (str) => '"' + String(str || "").replace(/"/g, '""') + '"';
+    
+    const rows = apps.map(a => [
+      escapeCsv(a.name || a.email),
+      escapeCsv(a.email),
+      escapeCsv(a.contactNumber),
+      escapeCsv(new Date(a.createdAt?.toDate ? a.createdAt.toDate() : a.createdAt).toISOString()),
+      escapeCsv(a.note)
+    ].join(","));
+    
+    const csvContent = "data:text/csv;charset=utf-8," + headers.join(",") + "\n" + rows.join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `project_applicants_${state._projectApplicantsDocId}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    return;
+  }
+
   renderAtTop();
 }
 
