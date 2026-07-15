@@ -11,17 +11,22 @@ export function isSchoolRep() {
   return state.role === "school-rep";
 }
 
+export function isFaculty() {
+  return state.role === "faculty";
+}
+
 export function isSuperAdmin() {
   return state.role === "admin";
 }
 
 export function canHost() {
-  return (isClubCore() || isSchoolRep()) && state.host.approved;
+  return (isClubCore() || isSchoolRep() || isFaculty()) && state.host.approved;
 }
 
 export function roleLabel() {
   if (isSuperAdmin()) return "Super admin";
   if (isClubCore()) return state.host.approved ? "Club core" : "Club pending";
+  if (isFaculty()) return state.host.approved ? "Faculty" : "Faculty pending";
   if (isSchoolRep()) return state.host.approved ? "School rep" : "School pending";
   return "Student";
 }
@@ -93,6 +98,7 @@ export async function syncFirebaseData() {
   state.rsvps = data.rsvps || [];
   state.myApplications = data.myApplications || [];
   state.siteSettings = data.siteSettings || [];
+  state.clubApplications = data.clubApplications || [];
   if (profile.role !== "superAdmin" && data.clubAccess) {
     state.role = "club-core";
     state.host.clubAccesses = data.clubAccesses || [data.clubAccess];
@@ -114,6 +120,10 @@ export async function syncFirebaseData() {
     state.host.isFaculty = data.schoolAccess.representative.facultyDesignation !== "Student Rep";
     state.host.approved = true;
     state.onboardingStep = null;
+    // Distinguish faculty vs school-rep by the representative type field
+    if (data.schoolAccess.representative.type === "faculty") {
+      state.role = "faculty";
+    }
   }
   state.dataLoaded = true;
   state.dataLoading = false;
@@ -148,6 +158,7 @@ export function hydrateCampusState(data) {
   state.rsvps = data.rsvps || [];
   state.myApplications = data.myApplications || [];
   state.siteSettings = data.siteSettings || [];
+  state.clubApplications = data.clubApplications || [];
 }
 
 export async function enterAuthenticatedApp(user) {

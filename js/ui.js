@@ -967,7 +967,7 @@ export function renderProjectDetail() {
 
         ${isOpen ? `
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;">
-            <button style="background:#D7AC54;color:#1a1a1a;border:none;padding:12px 28px;font-size:12px;font-weight:800;font-family:inherit;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;" data-action="apply-project" data-docid="${project.id}" data-title="${escapeHtml(project.title)}">Apply</button>
+            <button style="background:#D7AC54;color:#1a1a1a;border:none;padding:12px 28px;font-size:12px;font-weight:800;font-family:inherit;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;" data-action="open-project-apply" data-docid="${project.id}" data-title="${escapeHtml(project.title)}">Apply</button>
             <button style="background:none;border:1.5px solid #c8b89a;color:#5a4a3a;padding:12px 18px;font-size:12px;font-weight:700;font-family:inherit;letter-spacing:0.05em;text-transform:uppercase;cursor:pointer;" data-action="save-item" data-docid="${project.id}" data-kind="project" data-title="${escapeHtml(project.title)}">Save</button>
           </div>` : `
           <div style="background:#f0ece4;padding:12px 16px;margin-bottom:16px;border-left:3px solid #c8b89a;">
@@ -976,12 +976,15 @@ export function renderProjectDetail() {
 
         ${isMyProject ? `
           <div style="display:flex;gap:8px;padding-top:16px;border-top:1px solid #e8e0d4;">
+            <button style="background:#1a1a1a;color:#D7AC54;border:none;padding:8px 16px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;" data-action="open-project-applicants" data-docid="${project.id}">View Applicants</button>
             <button style="background:none;border:1.5px solid #c8b89a;padding:8px 16px;font-size:11px;font-weight:700;color:#5a4a3a;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;" data-action="toggle-project-status" data-docid="${project.id}" data-status="${escapeHtml(project.status)}">${isOpen ? "Close Applications" : "Reopen"}</button>
             <button style="background:none;border:1.5px solid #c8b89a;padding:8px 16px;font-size:11px;font-weight:700;color:#a09080;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;" data-action="delete-own-project" data-docid="${project.id}" data-title="${escapeHtml(project.title)}">Delete</button>
           </div>` : ""}
 
       </div>
     </div>
+    ${state._projectApplyDocId === project.id ? renderProjectApplyModal() : ""}
+    ${state._projectApplicantsDocId === project.id ? renderProjectApplicantsModal() : ""}
   `;
 }
 
@@ -1156,7 +1159,21 @@ export function renderProfile() {
         `<p style="font-size:14px;font-weight:600;color:#1a1a1a;margin:0;font-family:inherit;">${escapeHtml(a.title || "Project")}</p>`,
         badge(a.status || "pending", a.status === "accepted" ? "#2a7a4a" : "#8a7a6a")
       )).join("")
-    : `<p style="font-size:13px;color:#8a7a6a;margin:0;padding:8px 0;">No applications yet.</p>`;
+    : `<p style="font-size:13px;color:#8a7a6a;margin:0;padding:8px 0;">No project applications yet.</p>`;
+
+  const clubAppsContent = state.clubApplications.length
+    ? state.clubApplications.map(a => {
+        const club = clubs.find(c => c.id === a.clubId) || { name: "Unknown Club" };
+        const b = badge(a.status || "pending", a.status === "approved" ? "#2a7a4a" : a.status === "rejected" ? "#dc2626" : "#8a7a6a");
+        const withdrawBtn = a.status === "pending"
+          ? `<button style="background:none;border:none;color:#dc2626;font-size:11px;font-weight:700;text-transform:uppercase;cursor:pointer;margin-left:12px;font-family:inherit;" data-action="withdraw-club-application" data-docid="${a.id}">Withdraw</button>`
+          : "";
+        return listRow(
+          `<p style="font-size:14px;font-weight:600;color:#1a1a1a;margin:0;font-family:inherit;">${escapeHtml(club.name)}</p>`,
+          `<div style="display:flex;align-items:center;">${b}${withdrawBtn}</div>`
+        );
+      }).join("")
+    : `<p style="font-size:13px;color:#8a7a6a;margin:0;padding:8px 0;">No club applications yet.</p>`;
 
   const savedContent = state.savedItems.length
     ? state.savedItems.map(s => {
@@ -1221,7 +1238,7 @@ export function renderProfile() {
       <div style="margin-bottom:6px;">
         <p style="font-size:13px;color:#5a4a3a;margin:0 0 2px;font-family:inherit;">${escapeHtml(state.user.school || "")}</p>
         <p style="font-size:13px;color:#8a7a6a;margin:0 0 16px;font-family:inherit;">Year ${escapeHtml(state.user.year || "1")}</p>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
           <button style="
             background:none;border:1.5px solid #c8b89a;
             border-radius:0;padding:6px 16px;
@@ -1234,6 +1251,13 @@ export function renderProfile() {
             font-size:12px;font-weight:500;color:#5a4a3a;
             cursor:pointer;font-family:inherit;
           " data-action="edit-interests">Edit Interests</button>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          ${(state.clubApplications.filter(a => a.status === 'pending').length < 5) ? `
+            <button style="background:none;border:1.5px solid #D7AC54;color:#8a6a2a;padding:6px 16px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;" data-action="open-club-apply-modal">Apply for Club Core</button>
+          ` : ""}
+          <button style="background:none;border:1.5px solid #D7AC54;color:#8a6a2a;padding:6px 16px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;" data-action="start-school-rep-apply">Apply as School Rep</button>
+          <button style="background:none;border:1.5px solid #D7AC54;color:#8a6a2a;padding:6px 16px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;" data-action="open-faculty-apply-modal">Apply as Faculty</button>
         </div>
       </div>
 
@@ -1256,11 +1280,14 @@ export function renderProfile() {
       ${section("Clubs I Follow", followContent)}
       ${section("My RSVPs", rsvpContent)}
       ${section("Projects Applied To", appliedContent)}
+      ${section("My Club Applications", clubAppsContent)}
       ${section("Saved Items", savedContent)}
 
     </div>
     ${state.editProfileOpen ? renderEditProfileModal() : ""}
     ${state._profileInterestsOpen ? renderProfileInterestsModal() : ""}
+    ${state._clubApplyModalOpen ? renderClubApplyModal() : ""}
+    ${state._facultyApplyModalOpen ? renderFacultyApplyModal() : ""}
   `;
 }
 
@@ -1669,4 +1696,152 @@ export function renderOnboarding() {
   }
   return "";
 }
+
+export function renderClubApplyModal() {
+  const availableClubs = clubs.filter(c => 
+    !state.clubApplications.some(a => a.clubId === c.id && a.status === "pending")
+    && !(state.host.clubAccesses || []).some(ca => ca.clubId === c.id && state.host.approved)
+  );
+
+  return `
+    <div class="modal-layer">
+      <section class="modal">
+        <p class="eyebrow">Club Core</p>
+        <h2>Apply for Club Core</h2>
+        <p>You can have up to 5 active club core applications at a time.</p>
+        
+        <div class="form-grid">
+          <div class="field" style="margin-bottom:16px;">
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Select Club</label>
+            <select id="club-apply-select" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;">
+              ${availableClubs.map((club) => `<option value="${club.id}">${escapeHtml(club.name)}</option>`).join("")}
+              ${availableClubs.length === 0 ? `<option value="" disabled selected>No eligible clubs available</option>` : ""}
+            </select>
+          </div>
+        </div>
+        
+        <div style="display:flex;gap:12px;margin-top:16px;">
+          <button class="btn gold" style="flex:1;" data-action="submit-club-application" ${availableClubs.length === 0 ? 'disabled style="opacity:0.5;"' : ''}>Submit Application</button>
+          <button class="btn secondary" data-action="close-club-apply-modal">Cancel</button>
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+export function renderFacultyApplyModal() {
+  return `
+    <div class="modal-layer">
+      <section class="modal">
+        <p class="eyebrow">Faculty Access</p>
+        <h2>Apply as Faculty</h2>
+        <p>Faculty accounts can post school events and announcements.</p>
+        
+        <div class="form-grid two">
+          ${inputField("facultyName", "Full Name", state.user.name)}
+          ${inputField("facultyEmail", "RVU Email", state.authUser?.email || "", "", "email")}
+        </div>
+        
+        <div class="form-grid">
+          <div class="field" style="margin-bottom:16px;">
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">School / Faculty</label>
+            <select id="faculty-school" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;">
+              ${schools.map((school) => `<option value="${school}">${school}</option>`).join("")}
+            </select>
+          </div>
+          
+          <div class="field" style="margin-bottom:16px;">
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Designation</label>
+            <select id="faculty-designation" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;">
+              <option value="Assistant Professor">Assistant Professor</option>
+              <option value="Associate Professor">Associate Professor</option>
+              <option value="Professor">Professor</option>
+              <option value="Program Coordinator">Program Coordinator</option>
+              <option value="Dean">Dean</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+        </div>
+        
+        <div style="display:flex;gap:12px;margin-top:16px;">
+          <button class="btn gold" style="flex:1;" data-action="submit-faculty-application">Submit Request</button>
+          <button class="btn secondary" data-action="close-faculty-apply-modal">Cancel</button>
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+export function renderProjectApplyModal() {
+  return `
+    <div class="modal-layer">
+      <section class="modal">
+        <p class="eyebrow">Apply</p>
+        <h2>${escapeHtml(state._projectApplyTitle)}</h2>
+        
+        <div class="form-grid">
+          ${inputField("pa-name", "Full Name", state.user.name || state.authUser?.displayName || "")}
+          ${inputField("pa-phone", "Contact Number", "")}
+          
+          <div class="field" style="margin-bottom:16px;">
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Note to poster</label>
+            <textarea id="pa-note" placeholder="Why are you a good fit?" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;resize:vertical;min-height:80px;"></textarea>
+          </div>
+        </div>
+        
+        <div style="display:flex;gap:12px;margin-top:16px;">
+          <button class="btn gold" style="flex:1;" data-action="submit-project-application">Submit Application</button>
+          <button class="btn secondary" data-action="close-project-apply">Cancel</button>
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+export function renderProjectApplicantsModal() {
+  const applicants = state._projectApplicants || [];
+  
+  return `
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:40px 0 80px;">
+      <div style="background:#f5f2ec;width:100%;max-width:680px;margin:0 16px;">
+
+        <div style="padding:24px 24px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1.5px solid #d8cfc4;">
+          <div>
+            <h2 style="font-size:18px;font-weight:800;color:#1a1a1a;margin:0 0 4px;font-family:inherit;text-transform:uppercase;letter-spacing:0.03em;">Applicants</h2>
+            <p style="font-size:12px;color:#8a7a6a;margin:0;font-family:inherit;">${applicants.length} total applications</p>
+          </div>
+          <div style="display:flex;gap:12px;align-items:center;">
+            ${applicants.length > 0 ? `<button style="background:none;border:1.5px solid #c8b89a;color:#5a4a3a;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;" data-action="download-applicants-csv">Export CSV</button>` : ""}
+            <button style="background:none;border:none;font-size:24px;color:#8a7a6a;cursor:pointer;line-height:1;" data-action="close-project-applicants">×</button>
+          </div>
+        </div>
+
+        <div style="padding:24px;">
+          ${state._projectApplicantsLoading ? `
+            <div style="text-align:center;padding:40px 0;color:#8a7a6a;font-size:14px;font-family:inherit;">Loading applicants...</div>
+          ` : applicants.length === 0 ? `
+            <div style="text-align:center;padding:40px 0;color:#8a7a6a;font-size:14px;font-family:inherit;">No applicants yet.</div>
+          ` : applicants.map(a => `
+            <div style="background:#fff;border:1.5px solid #e8e0d4;padding:16px;margin-bottom:12px;">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
+                <div>
+                  <h3 style="font-size:15px;font-weight:700;color:#1a1a1a;margin:0 0 4px;font-family:inherit;">${escapeHtml(a.name || a.email)}</h3>
+                  <p style="font-size:13px;color:#5a4a3a;margin:0;font-family:inherit;">${escapeHtml(a.email)}</p>
+                  ${a.contactNumber ? `<p style="font-size:13px;color:#5a4a3a;margin:4px 0 0;font-family:inherit;">📞 ${escapeHtml(a.contactNumber)}</p>` : ""}
+                </div>
+                <span style="font-size:10px;font-weight:700;color:#8a7a6a;text-transform:uppercase;letter-spacing:0.05em;">${new Date(a.createdAt?.toDate ? a.createdAt.toDate() : a.createdAt).toLocaleDateString()}</span>
+              </div>
+              ${a.note ? `
+                <div style="background:#f9f7f4;padding:10px 12px;margin-top:12px;border-left:2px solid #D7AC54;">
+                  <p style="font-size:13px;color:#3a3a3a;margin:0;font-family:inherit;white-space:pre-line;">${escapeHtml(a.note)}</p>
+                </div>
+              ` : ""}
+            </div>
+          `).join("")}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 

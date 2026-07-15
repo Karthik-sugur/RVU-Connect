@@ -213,6 +213,29 @@ export function renderClubAdmin() {
           ${[...clubEvents.map((event) => ({ title: event.title, meta: `Event · ${event.date || ""}` })), ...clubAnnouncements.map((item) => ({ title: item.title, meta: `Announcement · ${escapeHtml(item.tag || "Update")}` }))].slice(0, 4).map((item) => adminRow(item.title, item.meta, ["Edit", "Archive"])).join("") || renderEmptyState("No club posts", "Create an event or announcement to manage it here.")}
         </article>
         <article class="admin-card">
+          <span class="section-num">Apply</span>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+            <h2 style="margin:0;">Membership Applications</h2>
+            <button style="background:none;border:1.5px solid #c8b89a;padding:4px 10px;font-size:11px;font-weight:700;color:#5a4a3a;cursor:pointer;text-transform:uppercase;" data-action="load-club-applicants" data-club="${club.id}">Refresh</button>
+          </div>
+          ${!state._clubApplicantsLoaded ? `
+            <div style="text-align:center;padding:20px;color:#8a7a6a;font-size:13px;">Click refresh to load pending applications.</div>
+          ` : state.clubApplicants.length === 0 ? `
+            ${renderEmptyState("No pending applications", "Student applications for club core will appear here.")}
+          ` : state.clubApplicants.map(app => `
+            <div class="admin-row">
+              <div>
+                <strong>${escapeHtml(app.name || app.email)}</strong>
+                <span>${escapeHtml(app.email)} · Applied: ${new Date(app.createdAt?.toDate ? app.createdAt.toDate() : app.createdAt).toLocaleDateString()}</span>
+              </div>
+              <div class="admin-row-actions">
+                <button data-action="approve-club-application" data-docid="${app.id}" data-uid="${app.uid}" data-email="${app.email}" data-name="${escapeHtml(app.name || "")}" data-club="${app.clubId}">Approve</button>
+                <button data-action="reject-club-application" data-docid="${app.id}">Reject</button>
+              </div>
+            </div>
+          `).join("")}
+        </article>
+        <article class="admin-card">
           <span class="section-num">Core</span>
           <h2>Core approval</h2>
           ${canManageCore ? `<div class="project-actions" style="margin-bottom:18px">
@@ -269,9 +292,10 @@ export function renderSuperAdmin() {
       <article class="admin-card wide">
         <span class="section-num">Pending</span>
         <h2>Pending Requests</h2>
-        ${pending.length ? pending.map((item) =>
-          adminRow(item.name || item.email, `${item.type} · ${item.roleTitle || "Representative"} · ${item.email}`, ["Approve", "Reject"], "host", item.id)
-        ).join("") : renderEmptyState("No pending requests", "Club core and school representative requests will appear here.")}
+        ${pending.length ? pending.map((item) => {
+          const typeLabel = item.type === "faculty" ? "Faculty" : item.type === "schoolRepresentative" ? "School Rep" : item.type;
+          return adminRow(item.name || item.email, `${typeLabel} · ${item.roleTitle || "Representative"} · ${item.email}`, ["Approve", "Reject"], "host", item.id);
+        }).join("") : renderEmptyState("No pending requests", "Faculty, school representative, and other requests will appear here.")}
       </article>
       <article class="admin-card">
         <span class="section-num">History</span>

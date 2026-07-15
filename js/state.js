@@ -120,6 +120,19 @@ export const state = {
   rsvps: [],
   myApplications: [],
   siteSettings: [],
+  // Club Core applications (student's own)
+  clubApplications: [],
+  // Pending applicants for the active club (club-core view)
+  clubApplicants: [],
+  _clubApplicantsLoaded: false,
+  // Modal flags
+  _clubApplyModalOpen: false,
+  _facultyApplyModalOpen: false,
+  _projectApplyDocId: null,
+  _projectApplyTitle: "",
+  _projectApplicantsDocId: null,
+  _projectApplicants: [],
+  _projectApplicantsLoading: false,
 };
 
 export const app = document.querySelector("#app");

@@ -115,9 +115,37 @@ service cloud.firestore {
         allow read: if isSuperAdmin()
           || (isRvuEmail() && memberEmail == request.auth.token.email)
           || isApprovedClubCore(clubId);
-          
-        allow create, update, delete: if isSuperAdmin();
+
+        // Super admin can always write. Approved core members can create/update
+        // their own club's core (e.g. approving a club application via batch write).
+        allow create, update: if isSuperAdmin() || isApprovedClubCore(clubId);
+        allow delete: if isSuperAdmin();
       }
+    }
+
+    match /clubApplications/{applicationId} {
+      // Students can create their own pending application
+      allow create: if isRvuEmail()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.status == 'pending';
+
+      // Student reads their own; club core reads for their club; super admin reads all
+      allow read: if isSuperAdmin()
+        || (isRvuEmail() && resource.data.uid == request.auth.uid)
+        || isApprovedClubCore(resource.data.clubId);
+
+      // Student can withdraw their own pending application
+      // Club core and super admin can approve or reject
+      allow update: if isSuperAdmin()
+        || (isRvuEmail()
+            && resource.data.uid == request.auth.uid
+            && request.resource.data.status == 'withdrawn'
+            && resource.data.status == 'pending')
+        || isApprovedClubCore(resource.data.clubId);
+
+      // Only super admin can delete (preserve records)
+      allow delete: if isSuperAdmin();
     }
 
     match /events/{eventId} {
@@ -199,7 +227,7 @@ service cloud.firestore {
       allow create: if isRvuEmail()
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.status == 'pending'
-        && request.resource.data.type in ['clubCore', 'schoolRepresentative', 'newClub'];
+        && request.resource.data.type in ['clubCore', 'schoolRepresentative', 'newClub', 'faculty'];
 
       allow read: if isSuperAdmin()
         || (isRvuEmail() && resource.data.uid == request.auth.uid);
