@@ -11,22 +11,19 @@ export function isSchoolRep() {
   return state.role === "school-rep";
 }
 
-export function isFaculty() {
-  return state.role === "faculty";
-}
 
 export function isSuperAdmin() {
   return state.role === "admin";
 }
 
 export function canHost() {
-  return (isClubCore() || isSchoolRep() || isFaculty()) && state.host.approved;
+  return (isClubCore() || isSchoolRep()) && state.host.approved;
 }
 
 export function roleLabel() {
   if (isSuperAdmin()) return "Super admin";
   if (isClubCore()) return state.host.approved ? "Club core" : "Club pending";
-  if (isFaculty()) return state.host.approved ? "Faculty" : "Faculty pending";
+
   if (isSchoolRep()) return state.host.approved ? "School rep" : "School pending";
   return "Student";
 }
@@ -73,9 +70,6 @@ export async function syncFirebaseData() {
   if (profile.roleTitle) state.host.roleTitle = profile.roleTitle;
   if (profile.hostName) state.host.name = profile.hostName;
   if (profile.hostApproved !== undefined) state.host.approved = profile.hostApproved;
-  if (profile.facultyDesignation) state.host.facultyDesignation = profile.facultyDesignation;
-  if (profile.facultyDepartment) state.host.facultyDepartment = profile.facultyDepartment;
-  if (profile.isFaculty !== undefined) state.host.isFaculty = profile.isFaculty;
   if (profile.role === "superAdmin" || profile.onboardingComplete) {
     state.onboardingStep = null;
   } else if (!state.onboardingStep) {
@@ -115,15 +109,8 @@ export async function syncFirebaseData() {
     state.host.school = data.schoolAccess.schoolId || profile.schoolScope || state.host.school;
     state.host.roleTitle = data.schoolAccess.representative.role || "representative";
     state.host.name = data.schoolAccess.representative.name || state.host.name;
-    state.host.facultyDesignation = data.schoolAccess.representative.facultyDesignation || "";
-    state.host.facultyDepartment = data.schoolAccess.representative.facultyDepartment || "";
-    state.host.isFaculty = data.schoolAccess.representative.facultyDesignation !== "Student Rep";
     state.host.approved = true;
     state.onboardingStep = null;
-    // Distinguish faculty vs school-rep by the representative type field
-    if (data.schoolAccess.representative.type === "faculty") {
-      state.role = "faculty";
-    }
   }
   state.dataLoaded = true;
   state.dataLoading = false;

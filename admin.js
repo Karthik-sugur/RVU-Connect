@@ -144,7 +144,7 @@ function defaultEvent() {
 }
 
 function defaultAnnouncement() {
-  return { title: "", description: "", source: "RVU", tag: "Notice", type: "Faculty" };
+  return { title: "", description: "", source: "RVU", tag: "Notice", type: "School" };
 }
 
 function defaultProject() {
@@ -157,7 +157,7 @@ function defaultRoleGrant() {
 
 function defaultSettings() {
   return {
-    eventCategories: "Club Event, Faculty Event, School Event",
+    eventCategories: "Club Event, School Event",
     interestTags: "AI, Web Development, Design, Business, Finance, Marketing, Product, Film, Law, Healthcare",
     announcementTags: "Recruitment, Notice, Update",
     reviewRequired: false,
@@ -601,7 +601,7 @@ function renderEvents() {
             ${input("event.time", "Time", state.forms.event.time)}
             ${input("event.location", "Location", state.forms.event.location)}
             ${input("event.host", "Host/source", state.forms.event.host)}
-            ${select("event.type", "Type", ["Club Event", "Faculty Event", "School Event"], state.forms.event.type)}
+            ${select("event.type", "Type", ["Club Event", "School Event"], state.forms.event.type)}
           </div>
           <button class="btn gold" data-action="create-event">Create event</button>
         </div>
@@ -638,7 +638,7 @@ function renderAnnouncements() {
           <div class="form-grid">
             ${input("announcement.source", "Source", state.forms.announcement.source)}
             ${input("announcement.tag", "Tag", state.forms.announcement.tag)}
-            ${select("announcement.type", "Type", ["Club", "Faculty"], state.forms.announcement.type)}
+            ${select("announcement.type", "Type", ["Club", "School"], state.forms.announcement.type)}
           </div>
           <button class="btn gold" data-action="create-announcement">Create notice</button>
         </div>

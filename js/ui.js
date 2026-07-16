@@ -618,7 +618,7 @@ export function renderEvents() {
       <p>Centralized discovery for club, faculty, and school events. Past events stay archived instead of disappearing.</p>
     </section>
     <div class="filters">
-      ${selectField("eventType", "Type", ["All", "Club Event", "Faculty Event", "School Event"], state.filters.eventType)}
+      ${selectField("eventType", "Type", ["All", "Club Event", "School Event"], state.filters.eventType)}
       ${selectField("club", "Club", ["All", ...clubs.map((club) => club.name)], "All")}
       ${selectField("date", "Date", ["All upcoming", "This week", "This month"], "All upcoming")}
     </div>
@@ -998,7 +998,7 @@ export function renderAnnouncements() {
       <p>Posts for recruitment, notices, registration updates, and internal information. No comments, upvotes, or social clutter.</p>
     </section>
     <div class="filters">
-      ${selectField("announcementType", "Source Type", ["All", "Club", "Faculty"], state.filters.announcementType)}
+      ${selectField("announcementType", "Source Type", ["All", "Club", "School"], state.filters.announcementType)}
       ${selectField("announcementTag", "Tag", ["All", "Recruitment", "Notice", "Update"], "All")}
     </div>
     ${filtered.length ? `<div class="updates">${filtered.map(renderAnnouncement).join("")}</div>` : renderEmptyState("No announcements yet", "Approved clubs and school representatives can publish structured updates.")}
@@ -1257,7 +1257,7 @@ export function renderProfile() {
             <button style="background:none;border:1.5px solid #D7AC54;color:#8a6a2a;padding:6px 16px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;" data-action="open-club-apply-modal">Apply for Club Core</button>
           ` : ""}
           <button style="background:none;border:1.5px solid #D7AC54;color:#8a6a2a;padding:6px 16px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;" data-action="start-school-rep-apply">Apply as School Rep</button>
-          <button style="background:none;border:1.5px solid #D7AC54;color:#8a6a2a;padding:6px 16px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;" data-action="open-faculty-apply-modal">Apply as Faculty</button>
+
         </div>
       </div>
 
@@ -1287,7 +1287,7 @@ export function renderProfile() {
     ${state.editProfileOpen ? renderEditProfileModal() : ""}
     ${state._profileInterestsOpen ? renderProfileInterestsModal() : ""}
     ${state._clubApplyModalOpen ? renderClubApplyModal() : ""}
-    ${state._facultyApplyModalOpen ? renderFacultyApplyModal() : ""}
+
   `;
 }
 
@@ -1382,11 +1382,7 @@ export function renderEventCard(event) {
     const profile = event;
     const source = event.host || "School";
     const schoolName = event.schoolName || event.schoolId || source;
-    if (profile.facultyDesignation) {
-      hostDisplay = `${profile.facultyDesignation} ${profile.hostName || source} · ${schoolName}`;
-    } else {
-      hostDisplay = schoolName;
-    }
+    hostDisplay = schoolName;
   }
 
   const actionButtons = isPast
@@ -1438,11 +1434,7 @@ export function renderUpdate(item) {
     const profile = item;
     const source = item.source || "School";
     const schoolName = item.schoolName || item.schoolId || source;
-    if (profile.facultyDesignation) {
-      hostDisplay = `${profile.facultyDesignation} ${profile.hostName || source} · ${schoolName}`;
-    } else {
-      hostDisplay = schoolName;
-    }
+    hostDisplay = schoolName;
   }
 
   return `
@@ -1520,11 +1512,7 @@ export function renderAnnouncement(item) {
     const profile = item;
     const source = item.source || "School";
     const schoolName = item.schoolName || item.schoolId || source;
-    if (profile.facultyDesignation) {
-      hostDisplay = `${profile.facultyDesignation} ${profile.hostName || source} · ${schoolName}`;
-    } else {
-      hostDisplay = schoolName;
-    }
+    hostDisplay = schoolName;
   }
 
   return `
@@ -1723,49 +1711,6 @@ export function renderClubApplyModal() {
         <div style="display:flex;gap:12px;margin-top:16px;">
           <button class="btn gold" style="flex:1;" data-action="submit-club-application" ${availableClubs.length === 0 ? 'disabled style="opacity:0.5;"' : ''}>Submit Application</button>
           <button class="btn secondary" data-action="close-club-apply-modal">Cancel</button>
-        </div>
-      </section>
-    </div>
-  `;
-}
-
-export function renderFacultyApplyModal() {
-  return `
-    <div class="modal-layer">
-      <section class="modal">
-        <p class="eyebrow">Faculty Access</p>
-        <h2>Apply as Faculty</h2>
-        <p>Faculty accounts can post school events and announcements.</p>
-        
-        <div class="form-grid two">
-          ${inputField("facultyName", "Full Name", state.user.name)}
-          ${inputField("facultyEmail", "RVU Email", state.authUser?.email || "", "", "email")}
-        </div>
-        
-        <div class="form-grid">
-          <div class="field" style="margin-bottom:16px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">School / Faculty</label>
-            <select id="faculty-school" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;">
-              ${schools.map((school) => `<option value="${school}">${school}</option>`).join("")}
-            </select>
-          </div>
-          
-          <div class="field" style="margin-bottom:16px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Designation</label>
-            <select id="faculty-designation" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;">
-              <option value="Assistant Professor">Assistant Professor</option>
-              <option value="Associate Professor">Associate Professor</option>
-              <option value="Professor">Professor</option>
-              <option value="Program Coordinator">Program Coordinator</option>
-              <option value="Dean">Dean</option>
-              <option value="Other">Other</option>
-            </select>
-          </div>
-        </div>
-        
-        <div style="display:flex;gap:12px;margin-top:16px;">
-          <button class="btn gold" style="flex:1;" data-action="submit-faculty-application">Submit Request</button>
-          <button class="btn secondary" data-action="close-faculty-apply-modal">Cancel</button>
         </div>
       </section>
     </div>

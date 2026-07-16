@@ -455,16 +455,14 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
           memberDocs.push({ club, member });
         }
       }
-      if ((request.type === "schoolRepresentative" || request.type === "faculty") && request.schoolId && !schoolAccesses.some((access) => access.schoolId === request.schoolId)) {
+      if (request.type === "schoolRepresentative" && request.schoolId && !schoolAccesses.some((access) => access.schoolId === request.schoolId)) {
         schoolAccesses.push({
           schoolId: request.schoolId,
           representative: {
             email,
             name: request.name || profile.name || email,
-            role: request.roleTitle || (request.type === "faculty" ? "faculty" : "representative"),
+            role: request.roleTitle || "representative",
             type: request.type,
-            facultyDesignation: request.facultyDesignation || "",
-            facultyDepartment: request.facultyDepartment || "",
             status: "approved",
             uid,
           },
@@ -593,15 +591,13 @@ async function updateHostRequestStatus(requestId, status) {
     }, { merge: true });
   }
 
-  if ((requestData.type === "schoolRepresentative" || requestData.type === "faculty") && requestData.schoolId && requestData.uid) {
+  if (requestData.type === "schoolRepresentative" && requestData.schoolId && requestData.uid) {
     await tracedSetDoc(doc(db, "schools", requestData.schoolId, "representatives", requestData.uid), {
       uid: requestData.uid,
       email: normalizedEmail || requestData.email || "",
       name: requestData.name || requestData.email || requestData.uid,
-      role: requestData.roleTitle || (requestData.type === "faculty" ? "faculty" : "representative"),
+      role: requestData.roleTitle || "representative",
       type: requestData.type || "schoolRepresentative",
-      facultyDesignation: requestData.facultyDesignation || "",
-      facultyDepartment: requestData.facultyDepartment || "",
       status,
       updatedAt: serverTimestamp(),
     }, { merge: true });

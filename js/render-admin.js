@@ -293,9 +293,9 @@ export function renderSuperAdmin() {
         <span class="section-num">Pending</span>
         <h2>Pending Requests</h2>
         ${pending.length ? pending.map((item) => {
-          const typeLabel = item.type === "faculty" ? "Faculty" : item.type === "schoolRepresentative" ? "School Rep" : item.type;
+          const typeLabel = item.type === "schoolRepresentative" ? "School Rep" : item.type;
           return adminRow(item.name || item.email, `${typeLabel} · ${item.roleTitle || "Representative"} · ${item.email}`, ["Approve", "Reject"], "host", item.id);
-        }).join("") : renderEmptyState("No pending requests", "Faculty, school representative, and other requests will appear here.")}
+        }).join("") : renderEmptyState("No pending requests", "School representative and other requests will appear here.")}
       </article>
       <article class="admin-card">
         <span class="section-num">History</span>
