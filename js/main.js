@@ -277,14 +277,8 @@ export async function handleAction(action, dataset) {
       return;
     }
     
-    let designation = "";
-    let department = "";
+
     if (isSchoolIntent) {
-      designation = document.getElementById("srep-designation")?.value || "";
-      department = document.getElementById("srep-department")?.value?.trim() || "";
-      state.host.facultyDesignation = designation;
-      state.host.facultyDepartment = department;
-      state.host.isFaculty = designation !== "Student Rep";
     }
 
     if (window.RVUFirebase) {
@@ -302,8 +296,6 @@ export async function handleAction(action, dataset) {
           description: state.host.description,
           joinLink: state.host.joinLink,
           approver: state.host.approver,
-          facultyDesignation: designation,
-          facultyDepartment: department,
         });
       }
     }
@@ -527,7 +519,7 @@ export async function handleAction(action, dataset) {
       time,
       location,
       host,
-      type: await promptUser("Type: Club Event, Faculty Event, School Event") || "School Event",
+      type: await promptUser("Type: Club Event, School Event") || "School Event",
       hostType: "admin",
       tags: [],
       status: "published",
@@ -544,7 +536,7 @@ export async function handleAction(action, dataset) {
       description: await promptUser("Description") || "",
       source: await promptUser("Source") || "RVU",
       tag: await promptUser("Tag") || "Notice",
-      type: "Faculty",
+      type: "School",
       sourceType: "admin",
       time: "Just now",
       status: "published",
@@ -645,7 +637,6 @@ export async function handleAction(action, dataset) {
       tags: [],
       link: link || null,
       posterUrl: posterUrl || null,
-      facultyDesignation: state.host.facultyDesignation || "",
       hostName: state.host.name || "",
       schoolName: state.host.school || "",
     };
@@ -699,15 +690,14 @@ export async function handleAction(action, dataset) {
     } else if (isSchoolRep()) {
       payload.source = state.host.school;
       payload.sourceType = "school";
-      payload.type = "Faculty";
+      payload.type = "School";
       payload.schoolId = state.host.school;
-      payload.facultyDesignation = state.host.facultyDesignation || "";
       payload.hostName = state.host.name || "";
       payload.schoolName = state.host.school || "";
     } else if (isSuperAdmin()) {
       payload.source = "RVU";
       payload.sourceType = "admin";
-      payload.type = "Faculty";
+      payload.type = "School";
     }
 
     const newAnn = await window.RVUFirebase.createAnnouncement(payload);
@@ -1156,44 +1146,6 @@ export async function handleAction(action, dataset) {
     return;
   }
 
-  if (action === "open-faculty-apply-modal") {
-    state._facultyApplyModalOpen = true;
-    renderAtTop();
-    return;
-  }
-  if (action === "close-faculty-apply-modal") {
-    state._facultyApplyModalOpen = false;
-    renderAtTop();
-    return;
-  }
-  if (action === "submit-faculty-application") {
-    if (!window.RVUFirebase) return;
-    const name = document.getElementById("facultyName")?.value?.trim();
-    const email = document.getElementById("facultyEmail")?.value?.trim();
-    const schoolId = document.getElementById("faculty-school")?.value;
-    const designation = document.getElementById("faculty-designation")?.value;
-    
-    if (!name || !email || !schoolId || !designation) {
-      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "All fields are required.", type: "info" } }));
-      return;
-    }
-    
-    try {
-      await window.RVUFirebase.submitHostRequest({
-        type: "faculty",
-        name,
-        email,
-        schoolId,
-        facultyDesignation: designation,
-      });
-      state._facultyApplyModalOpen = false;
-      renderAtTop();
-      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Faculty application submitted for review.", type: "info" } }));
-    } catch (e) {
-      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: e.message || "Error submitting.", type: "error" } }));
-    }
-    return;
-  }
 
   if (action === "load-club-applicants") {
     if (!window.RVUFirebase || !dataset.club) return;

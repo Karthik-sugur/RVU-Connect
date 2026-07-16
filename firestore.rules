@@ -227,7 +227,7 @@ service cloud.firestore {
       allow create: if isRvuEmail()
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.status == 'pending'
-        && request.resource.data.type in ['clubCore', 'schoolRepresentative', 'newClub', 'faculty'];
+        && request.resource.data.type in ['clubCore', 'schoolRepresentative', 'newClub'];
 
       allow read: if isSuperAdmin()
         || (isRvuEmail() && resource.data.uid == request.auth.uid);

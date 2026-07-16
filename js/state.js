@@ -98,9 +98,6 @@ export const state = {
     approver: "Current president",
     approvedBy: "Super Admin",
     approved: false,
-    facultyDesignation: "",
-    facultyDepartment: "",
-    isFaculty: true,
     clubAccesses: [],
   },
   filters: {
@@ -127,7 +124,7 @@ export const state = {
   _clubApplicantsLoaded: false,
   // Modal flags
   _clubApplyModalOpen: false,
-  _facultyApplyModalOpen: false,
+
   _projectApplyDocId: null,
   _projectApplyTitle: "",
   _projectApplicantsDocId: null,
