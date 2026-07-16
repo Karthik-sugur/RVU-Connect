@@ -455,13 +455,14 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
           memberDocs.push({ club, member });
         }
       }
-      if (request.type === "schoolRepresentative" && request.schoolId && !schoolAccesses.some((access) => access.schoolId === request.schoolId)) {
+      if ((request.type === "schoolRepresentative" || request.type === "faculty") && request.schoolId && !schoolAccesses.some((access) => access.schoolId === request.schoolId)) {
         schoolAccesses.push({
           schoolId: request.schoolId,
           representative: {
             email,
             name: request.name || profile.name || email,
-            role: request.roleTitle || "representative",
+            role: request.roleTitle || (request.type === "faculty" ? "faculty" : "representative"),
+            type: request.type,
             facultyDesignation: request.facultyDesignation || "",
             facultyDepartment: request.facultyDepartment || "",
             status: "approved",
