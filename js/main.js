@@ -161,12 +161,12 @@ export function bindEvents() {
       }
       if (intent === "school-rep") {
         state.host.type = "School Representative";
-        state.host.name = `${state.host.school} Office`;
+        state.host.name = "Student Representative";
         state.host.category = "School";
         state.host.approver = "Super Admin";
         state.host.approved = false;
         state.adminScope = "school";
-        state.onboardingStep = "host-info";
+        state.onboardingStep = "student-info";
         state._onboardingIntent = "school-rep";
       }
       render();
@@ -244,6 +244,20 @@ export async function handleAction(action, dataset) {
         interests: state.user.interests,
         onboardingComplete: true,
       });
+
+      if (state._onboardingIntent === "school-rep") {
+        await window.RVUFirebase.submitHostRequest({
+          type: "schoolRepresentative",
+          schoolId: state.user.school,
+          name: state.user.name,
+          roleTitle: "Student Representative",
+          description: "Student applying for School Representative role.",
+          approver: "Super Admin",
+        });
+        state.onboardingStep = "host-review";
+        navigate("home");
+        return;
+      }
     }
     state.onboardingStep = null;
     navigate("home");
@@ -270,34 +284,17 @@ export async function handleAction(action, dataset) {
   }
   if (action === "submit-host") {
     const isClubIntent = state._onboardingIntent === "club-core";
-    const isSchoolIntent = state._onboardingIntent === "school-rep";
     
     if (isClubIntent && state.host.selectedClubIds.length === 0) {
       window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Please select at least one club or create a new one.", type: "info" } }));
       return;
     }
-    
 
-    if (isSchoolIntent) {
-    }
-
-    if (window.RVUFirebase) {
-      if (isClubIntent) {
-        await window.RVUFirebase.submitMultiClubCoreRequest(state.host.selectedClubIds, {
-          name: state.host.name,
-          roleTitle: state.host.roleTitle,
-        });
-      } else {
-        await window.RVUFirebase.submitHostRequest({
-          type: "schoolRepresentative",
-          schoolId: state.host.school,
-          name: state.host.name,
-          roleTitle: state.host.roleTitle,
-          description: state.host.description,
-          joinLink: state.host.joinLink,
-          approver: state.host.approver,
-        });
-      }
+    if (window.RVUFirebase && isClubIntent) {
+      await window.RVUFirebase.submitMultiClubCoreRequest(state.host.selectedClubIds, {
+        name: state.host.name,
+        roleTitle: state.host.roleTitle,
+      });
     }
     state.host.approved = false;
     state.onboardingStep = "host-review";
@@ -1140,9 +1137,25 @@ export async function handleAction(action, dataset) {
   }
   
   if (action === "start-school-rep-apply") {
-    state.onboardingStep = "host-info";
-    state._onboardingIntent = "school-rep";
-    renderAtTop();
+    if (window.RVUFirebase) {
+      if (!state.user.school) {
+        window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Please select your school in your profile first.", type: "error" } }));
+        return;
+      }
+      try {
+        await window.RVUFirebase.submitHostRequest({
+          type: "schoolRepresentative",
+          schoolId: state.user.school,
+          name: state.user.name,
+          roleTitle: "Student Representative",
+          description: "Student applying for School Representative role.",
+          approver: "Super Admin",
+        });
+        window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "School rep application submitted for review.", type: "success" } }));
+      } catch (e) {
+        window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Failed to apply.", type: "error" } }));
+      }
+    }
     return;
   }
 
