@@ -1537,7 +1537,7 @@ export function renderOnboarding() {
           <div class="choice-grid">
             <button class="choice" data-onboard-role="student"><strong>Student</strong>Discover events, explore clubs, and join projects.</button>
             <button class="choice" data-onboard-role="club-core"><strong>Club core</strong>Represent a club, manage links, and host club events after approval.</button>
-            <button class="choice" data-onboard-role="school-rep"><strong>School representative</strong>Post school events, faculty notices, and official school links after approval.</button>
+            <button class="choice" data-onboard-role="school-rep"><strong>School representative</strong>Post school events and official school links after approval.</button>
           </div>
         </section>
       </div>
@@ -1572,64 +1572,29 @@ export function renderOnboarding() {
     `;
   }
   if (state.onboardingStep === "host-info") {
-    const isClubRequest = state._onboardingIntent === "club-core";
     const clubOptions = clubs.length ? clubs.map((club) => ({ id: club.id || club.slug, name: club.name })) : [];
     return `
       <div class="modal-layer">
         <section class="modal">
-          <p class="eyebrow">${isClubRequest ? "Club core request" : "School representative request"}</p>
-          <h2>${isClubRequest ? "Which club are you core in?" : "Which school do you represent?"}</h2>
+          <p class="eyebrow">Club core request</p>
+          <h2>Which club are you core in?</h2>
           
-          ${isClubRequest ? `
-            <div style="margin-bottom:16px;">
-              ${clubOptions.length ? multiSelectField("hostClubs", "Select Clubs", clubOptions, state.host.selectedClubIds) : "<p style='font-size:14px;color:#8a7a6a;margin-bottom:16px;'>No approved clubs available.</p>"}
-              <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
-                <div style="flex:1;height:1.5px;background:#e8e0d4;"></div>
-                <span style="font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;">OR</span>
-                <div style="flex:1;height:1.5px;background:#e8e0d4;"></div>
-              </div>
-              <!-- <button class="btn secondary" style="width:100%;margin-bottom:16px;" data-action="create-new-club-onboarding">Create a New Club Instead</button> -->
-              <p style="font-size:12px;color:#8a7a6a;text-align:center;font-family:inherit;">Note: New club creation is temporarily disabled. Select an existing club.</p>
+          <div style="margin-bottom:16px;">
+            ${clubOptions.length ? multiSelectField("hostClubs", "Select Clubs", clubOptions, state.host.selectedClubIds) : "<p style='font-size:14px;color:#8a7a6a;margin-bottom:16px;'>No approved clubs available.</p>"}
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+              <div style="flex:1;height:1.5px;background:#e8e0d4;"></div>
+              <span style="font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;">OR</span>
+              <div style="flex:1;height:1.5px;background:#e8e0d4;"></div>
             </div>
-            <div class="form-grid two">
-              ${inputField("hostRoleTitle", "Role (for selected clubs)", state.host.roleTitle)}
-              ${inputField("hostName", "Core display name", state.host.name)}
-            </div>
-          ` : `
-            <div class="form-grid two">
-              ${selectField("hostSchool", "School", schools, state.host.school)}
-              ${inputField("hostRoleTitle", "Role", state.host.roleTitle)}
-            </div>
-            <div class="form-grid">
-              ${inputField("hostName", "Office / representative name", state.host.name)}
-            </div>
-          `}
-          
-          <div class="form-grid">
-            ${!isClubRequest ? `
-            <div style="margin-bottom:16px;">
-              <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Designation</label>
-              <select id="srep-designation" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;">
-                <option value="Prof.">Prof.</option>
-                <option value="Dr.">Dr.</option>
-                <option value="HOD">HOD</option>
-                <option value="Student Rep">Student Representative</option>
-                <option value="">Other</option>
-              </select>
-            </div>
-            <div style="margin-bottom:16px;">
-              <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Department (optional)</label>
-              <input id="srep-department" type="text" placeholder="e.g. Department of Computer Science" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
-            </div>` : ""}
-            
-            ${isClubRequest ? "" : `
-              ${inputField("hostEmail", "Contact Email", state.host.email)}
-              ${selectField("hostApprover", "Approval route", ["Super Admin"], "Super Admin")}
-              <div class="field"><label>Description</label><textarea data-input="hostDescription">${state.host.description}</textarea></div>
-              ${inputField("hostJoin", "Join Link optional", state.host.joinLink)}
-            `}
+            <!-- <button class="btn secondary" style="width:100%;margin-bottom:16px;" data-action="create-new-club-onboarding">Create a New Club Instead</button> -->
+            <p style="font-size:12px;color:#8a7a6a;text-align:center;font-family:inherit;">Note: New club creation is temporarily disabled. Select an existing club.</p>
           </div>
-          <button class="btn gold" data-action="submit-host">${isClubRequest ? "Submit request" : "Submit for review"}</button>
+          <div class="form-grid two">
+            ${inputField("hostRoleTitle", "Role (for selected clubs)", state.host.roleTitle)}
+            ${inputField("hostName", "Core display name", state.host.name)}
+          </div>
+          
+          <button class="btn gold" data-action="submit-host">Submit request</button>
         </section>
       </div>
     `;
