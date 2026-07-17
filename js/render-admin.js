@@ -1,5 +1,5 @@
 import { state } from "./state.js";
-import { activeClub } from "./auth.js";
+import { activeClub, isClubCore, isSchoolRep, isSuperAdmin } from "./auth.js";
 import { escapeHtml, selectField, inputField } from "./utils.js";
 import { sectionLabel, renderEmptyState } from "./ui.js";
 
