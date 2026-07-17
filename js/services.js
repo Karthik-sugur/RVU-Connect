@@ -352,9 +352,11 @@ async function saveUserProfile(uid, data) {
 let lastDocs = { events: null, announcements: null, projects: null };
 
 async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
-  const eventsSnap = await getDocs(query(collection(db, "events"), where("status", "==", "published"), orderBy("createdAt", "desc"), limit(20))).catch(() => ({ docs: [] }));
-  const announcementsSnap = await getDocs(query(collection(db, "announcements"), where("status", "==", "published"), orderBy("createdAt", "desc"), limit(20))).catch(() => ({ docs: [] }));
-  const projectsSnap = await getDocs(query(collection(db, "projects"), orderBy("createdAt", "desc"), limit(20))).catch(() => ({ docs: [] }));
+  const [eventsSnap, announcementsSnap, projectsSnap] = await Promise.all([
+    getDocs(query(collection(db, "events"), where("status", "==", "published"), orderBy("createdAt", "desc"), limit(20))).catch(() => ({ docs: [] })),
+    getDocs(query(collection(db, "announcements"), where("status", "==", "published"), orderBy("createdAt", "desc"), limit(20))).catch(() => ({ docs: [] })),
+    getDocs(query(collection(db, "projects"), orderBy("createdAt", "desc"), limit(20))).catch(() => ({ docs: [] })),
+  ]);
 
   lastDocs.events = eventsSnap.docs[eventsSnap.docs.length - 1] || null;
   lastDocs.announcements = announcementsSnap.docs[announcementsSnap.docs.length - 1] || null;
@@ -385,7 +387,6 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
     savedItems: [],
     followedClubs: [],
     rsvps: [],
-    myApplications: [],
     siteSettings: settingsRows,
     clubAccess: null,
     clubAccesses: [],
@@ -396,11 +397,10 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
   if (auth.currentUser?.email) {
     const email = auth.currentUser.email.trim().toLowerCase();
     const uid = auth.currentUser.uid;
-    const [savedRows, followRows, rsvpRows, applicationRows, clubAppRows] = await Promise.all([
+    const [savedRows, followRows, rsvpRows, clubAppRows] = await Promise.all([
       rowsOrEmpty("saved items", getDocs(query(collection(db, "users", uid, "savedItems"), limit(50)))),
       rowsOrEmpty("followed clubs", getDocs(query(collection(db, "users", uid, "followedClubs"), limit(50)))),
       rowsOrEmpty("event RSVPs", getDocs(query(collection(db, "users", uid, "rsvps"), limit(50)))),
-      rowsOrEmpty("project applications", getDocs(query(collection(db, "users", uid, "applications"), limit(50)))),
       rowsOrEmpty("club applications", getDocs(query(collection(db, "clubApplications"), where("uid", "==", uid), limit(20)))),
     ]);
     const ownHostRequests = await rowsOrEmpty("host requests", getDocs(query(collection(db, "hostRequests"), where("uid", "==", uid), limit(50))));
@@ -477,7 +477,6 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
     data.savedItems = savedRows;
     data.followedClubs = followRows;
     data.rsvps = rsvpRows;
-    data.myApplications = applicationRows;
     data.clubApplications = clubAppRows;
   }
 
@@ -871,46 +870,6 @@ async function rsvpEvent(eventId, payload = {}) {
   }, { merge: true });
   await batch.commit();
 }
-
-async function applyToProject(projectId, payload = {}) {
-  const user = auth.currentUser;
-  if (!user) throw new Error("Sign in first.");
-  const application = {
-    userId: user.uid,
-    email: user.email,
-    name: payload.name || user.displayName || user.email,
-    contactNumber: payload.contactNumber || "",
-    note: payload.note || "",
-    status: "pending",
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  };
-  const batch = tracedWriteBatch("applyToProject");
-  batch.set(doc(db, "projects", projectId, "applications", user.uid), application);
-  batch.set(doc(db, "users", user.uid, "applications", projectId), {
-    projectId,
-    title: payload.title || "",
-    status: "pending",
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
-  await batch.commit();
-}
-
-async function updateProjectApplicationStatus(projectId, userId, status) {
-  requireOneOf(status, ["pending", "accepted", "rejected"], "Project application status");
-  const batch = tracedWriteBatch("updateProjectApplicationStatus");
-  batch.update(doc(db, "projects", projectId, "applications", userId), {
-    status,
-    updatedAt: serverTimestamp(),
-  });
-  batch.update(doc(db, "users", userId, "applications", projectId), {
-    status,
-    updatedAt: serverTimestamp(),
-  });
-  await batch.commit();
-}
-
 async function flagContent(payload) {
   const user = auth.currentUser;
   if (!user) throw new Error("Sign in first.");
@@ -927,11 +886,6 @@ async function flagContent(payload) {
 
 async function getEventRSVPs(eventId) {
   const snap = await getDocs(collection(db, "events", eventId, "rsvps"));
-  return rows(snap);
-}
-
-async function getProjectApplicants(projectId) {
-  const snap = await getDocs(query(collection(db, "projects", projectId, "applications")));
   return rows(snap);
 }
 
@@ -1084,7 +1038,6 @@ window.RVUFirebase = {
   db,
   analytics,
   assignClubCoreRole,
-  applyToProject,
   createEmailPasswordAccount,
   createAnnouncement,
   createClub,
@@ -1124,12 +1077,10 @@ window.RVUFirebase = {
   updateDocument,
   updateEventStatus,
   updateHostRequestStatus,
-  updateProjectApplicationStatus,
   updateSiteSetting,
   updateUserRole,
   removeClubCoreRole,
   getEventRSVPs,
-  getProjectApplicants,
   signInWithGoogle,
   signOut: () => {
     _cachedSuperAdminResult = null;
