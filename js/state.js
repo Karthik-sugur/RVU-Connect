@@ -115,7 +115,6 @@ export const state = {
   savedItems: [],
   followedClubs: [],
   rsvps: [],
-  myApplications: [],
   siteSettings: [],
   // Club Core applications (student's own)
   clubApplications: [],
@@ -124,12 +123,6 @@ export const state = {
   _clubApplicantsLoaded: false,
   // Modal flags
   _clubApplyModalOpen: false,
-
-  _projectApplyDocId: null,
-  _projectApplyTitle: "",
-  _projectApplicantsDocId: null,
-  _projectApplicants: [],
-  _projectApplicantsLoading: false,
 };
 
 export const app = document.querySelector("#app");

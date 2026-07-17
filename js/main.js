@@ -563,6 +563,11 @@ export async function handleAction(action, dataset) {
     const tags = (document.getElementById("cp-tags")?.value || "").split(",").map(t => t.trim()).filter(Boolean);
     const expiry = document.getElementById("cp-expiry")?.value || "";
     const phone = document.getElementById("cp-phone")?.value?.trim() || "";
+    const applicationLink = document.getElementById("cp-applink")?.value?.trim() || "";
+    if (applicationLink && !/^https?:\/\//.test(applicationLink)) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "External application link must start with http:// or https://", type: "info" } }));
+      return;
+    }
     const newProj = await window.RVUFirebase.createProject({
       title,
       description,
@@ -570,6 +575,7 @@ export async function handleAction(action, dataset) {
       tags,
       expiry,
       contactPhone: phone,
+      applicationLink: applicationLink || null,
       postedBy: state.authUser?.email || state.user.name || "Student",
       postedByName: state.user.name || "",
       status: "open",
@@ -1200,108 +1206,6 @@ export async function handleAction(action, dataset) {
     } catch (e) {
       window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Error rejecting.", type: "error" } }));
     }
-    return;
-  }
-
-  if (action === "open-project-apply") {
-    state._projectApplyDocId = dataset.docid;
-    state._projectApplyTitle = dataset.title || "Project";
-    renderAtTop();
-    return;
-  }
-  if (action === "close-project-apply") {
-    state._projectApplyDocId = null;
-    state._projectApplyTitle = "";
-    renderAtTop();
-    return;
-  }
-  if (action === "submit-project-application") {
-    if (!window.RVUFirebase || !state._projectApplyDocId) return;
-    const name = document.getElementById("pa-name")?.value?.trim();
-    const contactNumber = document.getElementById("pa-phone")?.value?.trim();
-    const note = document.getElementById("pa-note")?.value?.trim();
-    
-    if (!name) {
-      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Name is required.", type: "info" } }));
-      return;
-    }
-    
-    try {
-      await window.RVUFirebase.applyToProject(state._projectApplyDocId, {
-        title: state._projectApplyTitle,
-        name,
-        contactNumber,
-        note,
-      });
-      state.myApplications = [...(state.myApplications || []), { 
-        projectId: state._projectApplyDocId, 
-        title: state._projectApplyTitle, 
-        status: "pending", 
-        id: state._projectApplyDocId 
-      }];
-      state._projectApplyDocId = null;
-      renderAtTop();
-      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Application submitted.", type: "info" } }));
-    } catch (e) {
-      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: e.message || "Error submitting.", type: "error" } }));
-    }
-    return;
-  }
-
-  if (action === "open-project-applicants") {
-    if (!dataset.docid) return;
-    state._projectApplicantsDocId = dataset.docid;
-    state._projectApplicants = [];
-    state._projectApplicantsLoading = true;
-    renderAtTop();
-    
-    if (window.RVUFirebase) {
-      window.RVUFirebase.getProjectApplicants(dataset.docid).then(apps => {
-        if (state._projectApplicantsDocId === dataset.docid) {
-          state._projectApplicants = apps;
-          state._projectApplicantsLoading = false;
-          renderAtTop();
-        }
-      }).catch(e => {
-        console.error("Failed to load applicants", e);
-        if (state._projectApplicantsDocId === dataset.docid) {
-          state._projectApplicantsLoading = false;
-          renderAtTop();
-          window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Failed to load applicants.", type: "error" } }));
-        }
-      });
-    }
-    return;
-  }
-  if (action === "close-project-applicants") {
-    state._projectApplicantsDocId = null;
-    state._projectApplicants = [];
-    renderAtTop();
-    return;
-  }
-  if (action === "download-applicants-csv") {
-    const apps = state._projectApplicants || [];
-    if (!apps.length) return;
-    
-    const headers = ["Name", "Email", "Phone", "Applied", "Note"];
-    const escapeCsv = (str) => '"' + String(str || "").replace(/"/g, '""') + '"';
-    
-    const rows = apps.map(a => [
-      escapeCsv(a.name || a.email),
-      escapeCsv(a.email),
-      escapeCsv(a.contactNumber),
-      escapeCsv(new Date(a.createdAt?.toDate ? a.createdAt.toDate() : a.createdAt).toISOString()),
-      escapeCsv(a.note)
-    ].join(","));
-    
-    const csvContent = "data:text/csv;charset=utf-8," + headers.join(",") + "\n" + rows.join("\n");
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `project_applicants_${state._projectApplicantsDocId}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
     return;
   }
 
