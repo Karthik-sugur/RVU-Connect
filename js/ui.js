@@ -2,6 +2,7 @@ import { icon, multiSelectField, selectField, inputField, clubInputField, clubSe
 import { schools, interests, events, clubs, announcements, projects, state, app } from './state.js';
 import { isClubCore, isSchoolRep, isSuperAdmin, canHost, roleLabel, activeClub } from './auth.js';
 import { bindEvents } from './main.js';
+import { renderAdminConsole } from './render-admin.js';
 
 export function render() {
   try {
