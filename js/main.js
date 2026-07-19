@@ -634,14 +634,14 @@ export async function handleAction(action, dataset) {
     } : {
       title, description, date, time, location,
       hostType: "school",
-      schoolId: state.host.school,
-      host: state.host.school,
+      schoolId: document.getElementById("ce-host-school")?.value || state.host.school,
+      host: document.getElementById("ce-host-school")?.value || state.host.school,
       type: "School Event",
       tags: [],
       link: link || null,
       posterUrl: posterUrl || null,
       hostName: state.host.name || "",
-      schoolName: state.host.school || "",
+      schoolName: document.getElementById("ce-host-school")?.value || state.host.school || "",
     };
     const newEvent = await window.RVUFirebase.createEvent(payload);
     events.unshift(newEvent);
@@ -691,12 +691,13 @@ export async function handleAction(action, dataset) {
       payload.type = "Club";
       payload.clubId = club.id || club.slug;
     } else if (isSchoolRep()) {
-      payload.source = state.host.school;
+      const selectedSchool = document.getElementById("ca-host-school")?.value || state.host.school;
+      payload.source = selectedSchool;
       payload.sourceType = "school";
       payload.type = "School";
-      payload.schoolId = state.host.school;
+      payload.schoolId = selectedSchool;
       payload.hostName = state.host.name || "";
-      payload.schoolName = state.host.school || "";
+      payload.schoolName = selectedSchool || "";
     } else if (isSuperAdmin()) {
       payload.source = "RVU";
       payload.sourceType = "admin";

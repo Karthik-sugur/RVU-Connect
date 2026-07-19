@@ -112,6 +112,16 @@ export async function syncFirebaseData() {
     state.host.approved = true;
     state.onboardingStep = null;
   }
+  // Primary path: detect school rep via hostRole written to users/{uid} on approval.
+  // This works even without a schools/{schoolId}/representatives subcollection entry.
+  if (profile.role !== "superAdmin" && profile.hostRole === "schoolRepresentative" && !data.schoolAccess) {
+    state.role = "school-rep";
+    state.host.school = profile.schoolScope || state.host.school || schools[0] || "";
+    state.host.roleTitle = profile.roleTitle || "representative";
+    state.host.name = profile.name || state.host.name;
+    state.host.approved = true;
+    state.onboardingStep = null;
+  }
   state.dataLoaded = true;
   state.dataLoading = false;
 }

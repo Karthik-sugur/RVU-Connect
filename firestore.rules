@@ -29,10 +29,10 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/clubs/$(clubId)/coreMembers/$(request.auth.token.email)).data.status == 'approved';
     }
 
-    function isApprovedSchoolRep(schoolId) {
+    function isApprovedSchoolRep() {
       return isRvuEmail()
-        && exists(/databases/$(database)/documents/schools/$(schoolId)/representatives/$(request.auth.uid))
-        && get(/databases/$(database)/documents/schools/$(schoolId)/representatives/$(request.auth.uid)).data.status == 'approved';
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.hostRole == 'schoolRepresentative';
     }
 
     function isPublished() {
@@ -97,7 +97,7 @@ service cloud.firestore {
       allow create, update, delete: if isSuperAdmin();
 
       match /representatives/{uid} {
-        allow read: if isSuperAdmin() || createsOwnDoc(uid) || isApprovedSchoolRep(schoolId);
+        allow read: if isSuperAdmin() || createsOwnDoc(uid);
         allow create, update, delete: if isSuperAdmin();
       }
     }
@@ -151,17 +151,17 @@ service cloud.firestore {
       allow create: if isRvuEmail()
         && (
           (request.resource.data.hostType == 'club' && isApprovedClubCore(request.resource.data.clubId))
-          || (request.resource.data.hostType == 'school' && isApprovedSchoolRep(request.resource.data.schoolId))
+          || (request.resource.data.hostType == 'school' && isApprovedSchoolRep())
           || isSuperAdmin()
         );
 
       allow update: if isSuperAdmin()
         || (resource.data.hostType == 'club' && isApprovedClubCore(resource.data.clubId) && unchanged('createdAt'))
-        || (resource.data.hostType == 'school' && isApprovedSchoolRep(resource.data.schoolId) && unchanged('createdAt'));
+        || (resource.data.hostType == 'school' && isApprovedSchoolRep() && unchanged('createdAt'));
         
       allow delete: if isSuperAdmin()
         || (resource.data.hostType == 'club' && isApprovedClubCore(resource.data.clubId))
-        || (resource.data.hostType == 'school' && isApprovedSchoolRep(resource.data.schoolId));
+        || (resource.data.hostType == 'school' && isApprovedSchoolRep());
 
       match /rsvps/{uid} {
         allow read: if isSuperAdmin() || createsOwnDoc(uid);
@@ -175,17 +175,17 @@ service cloud.firestore {
       allow create: if isRvuEmail()
         && (
           (request.resource.data.sourceType == 'club' && isApprovedClubCore(request.resource.data.clubId))
-          || (request.resource.data.sourceType == 'school' && isApprovedSchoolRep(request.resource.data.schoolId))
+          || (request.resource.data.sourceType == 'school' && isApprovedSchoolRep())
           || isSuperAdmin()
         );
 
       allow update: if isSuperAdmin()
         || (resource.data.sourceType == 'club' && isApprovedClubCore(resource.data.clubId) && unchanged('createdAt'))
-        || (resource.data.sourceType == 'school' && isApprovedSchoolRep(resource.data.schoolId) && unchanged('createdAt'));
+        || (resource.data.sourceType == 'school' && isApprovedSchoolRep() && unchanged('createdAt'));
         
       allow delete: if isSuperAdmin()
         || (resource.data.sourceType == 'club' && isApprovedClubCore(resource.data.clubId))
-        || (resource.data.sourceType == 'school' && isApprovedSchoolRep(resource.data.schoolId));
+        || (resource.data.sourceType == 'school' && isApprovedSchoolRep());
     }
 
     match /projects/{projectId} {
