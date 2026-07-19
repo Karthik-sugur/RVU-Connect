@@ -49,6 +49,14 @@ export function renderCreateEventModal() {
             <p style="font-size:12px;font-weight:600;color:#5a4a3a;margin:0;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;">Posting as ${escapeHtml(myClub.name)}</p>
           </div>` : "")}
 
+          ${isSchoolRep() ? `
+          <div style="margin-bottom:20px;">
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">School *</label>
+            <select id="ce-host-school" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;">
+              ${schools.map(s => `<option value="${escapeHtml(s)}" ${state.host.school === s ? "selected" : ""}>${escapeHtml(s)}</option>`).join("")}
+            </select>
+          </div>` : ""}
+
           <div style="margin-bottom:20px;">
             <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Event Title *</label>
             <input id="ce-title" type="text" placeholder="What's the event called?" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
@@ -178,6 +186,14 @@ export function renderCreateAnnouncementModal() {
                 </label>`).join("")}
             </div>
           </div>
+
+          ${isSchoolRep() ? `
+          <div style="margin-bottom:20px;">
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">School *</label>
+            <select id="ca-host-school" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;">
+              ${schools.map(s => `<option value="${escapeHtml(s)}" ${state.host.school === s ? "selected" : ""}>${escapeHtml(s)}</option>`).join("")}
+            </select>
+          </div>` : ""}
 
           <div style="margin-bottom:20px;">
             <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Title *</label>

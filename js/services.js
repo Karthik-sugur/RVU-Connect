@@ -1,5 +1,5 @@
 import { app, auth, db, analytics } from "./firebase-init.js";
-import { getDoc, getDocs, setDoc, updateDoc, deleteDoc, doc, collection, collectionGroup, query, where, orderBy, limit, startAfter, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
+import { getDoc, getDocs, setDoc, updateDoc, deleteDoc, deleteField, doc, collection, collectionGroup, query, where, orderBy, limit, startAfter, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 import { onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, signOut } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import { handleFirebaseError } from "./errors.js";
 import { EMAIL_DOMAIN } from "./constants.js";
@@ -133,7 +133,7 @@ function ruleTraceFor(path, operation, payload = {}) {
     rule = "match /events/{eventId}";
     checks.push("create requires payload.createdBy == auth.uid");
     checks.push("hostType club requires approved core doc at clubs/{clubId}/coreMembers/{auth.email}");
-    checks.push("hostType school requires approved representative doc at schools/{schoolId}/representatives/{auth.uid}");
+    checks.push("hostType school requires users/{uid}.hostRole == 'schoolRepresentative'");
     checks.push("super admin can create/update/delete");
     checks.push("non-admin update must not change createdBy or createdAt");
     category = "ownership mismatch, role mismatch, incorrect document path, or incorrect payload";
@@ -141,7 +141,7 @@ function ruleTraceFor(path, operation, payload = {}) {
     rule = "match /announcements/{announcementId}";
     checks.push("create requires payload.createdBy == auth.uid");
     checks.push("sourceType club requires approved core doc at clubs/{clubId}/coreMembers/{auth.email}");
-    checks.push("sourceType school requires approved representative doc at schools/{schoolId}/representatives/{auth.uid}");
+    checks.push("sourceType school requires users/{uid}.hostRole == 'schoolRepresentative'");
     checks.push("super admin can create/update/delete");
     checks.push("non-admin update must not change createdBy or createdAt");
     category = "ownership mismatch, role mismatch, incorrect document path, or incorrect payload";
@@ -590,16 +590,20 @@ async function updateHostRequestStatus(requestId, status) {
     }, { merge: true });
   }
 
-  if (requestData.type === "schoolRepresentative" && requestData.schoolId && requestData.uid) {
-    await tracedSetDoc(doc(db, "schools", requestData.schoolId, "representatives", requestData.uid), {
-      uid: requestData.uid,
-      email: normalizedEmail || requestData.email || "",
-      name: requestData.name || requestData.email || requestData.uid,
-      role: requestData.roleTitle || "representative",
-      type: requestData.type || "schoolRepresentative",
-      status,
-      updatedAt: serverTimestamp(),
-    }, { merge: true });
+  if (requestData.type === "schoolRepresentative" && requestData.uid) {
+    if (status === "approved") {
+      // Grant the hostRole by merging into users/{uid}. Safe even if the document already exists.
+      await tracedSetDoc(doc(db, "users", requestData.uid), {
+        hostRole: "schoolRepresentative",
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+    } else {
+      // Rejected or revoked: remove hostRole so permissions don't persist.
+      await tracedUpdateDoc(doc(db, "users", requestData.uid), {
+        hostRole: deleteField(),
+        updatedAt: serverTimestamp(),
+      });
+    }
   }
 }
 
