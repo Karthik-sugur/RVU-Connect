@@ -812,7 +812,8 @@ export const demoCampusData = {
       status: "pending",
     },
     {
-      id: "demo-request-school",
+      id: "schoolRepresentative_demo-user-outreach",
+      uid: "demo-user-outreach",
       name: "Office of Design Outreach",
       email: "design.outreach@rvu.edu.in",
       type: "schoolRepresentative",

@@ -31,8 +31,8 @@ service cloud.firestore {
 
     function isApprovedSchoolRep() {
       return isRvuEmail()
-        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.hostRole == 'schoolRepresentative';
+        && exists(/databases/$(database)/documents/hostRequests/$('schoolRepresentative_' + request.auth.uid))
+        && get(/databases/$(database)/documents/hostRequests/$('schoolRepresentative_' + request.auth.uid)).data.status == 'approved';
     }
 
     function isPublished() {
@@ -211,7 +211,14 @@ service cloud.firestore {
       allow read: if isSuperAdmin()
         || (isRvuEmail() && resource.data.uid == request.auth.uid);
 
-      allow update, delete: if isSuperAdmin();
+      allow update: if isSuperAdmin()
+        || (isRvuEmail()
+            && resource.data.uid == request.auth.uid
+            && request.resource.data.uid == request.auth.uid
+            && request.resource.data.status == 'pending'
+            && request.resource.data.type == resource.data.type);
+
+      allow delete: if isSuperAdmin();
     }
 
     match /moderationFlags/{flagId} {

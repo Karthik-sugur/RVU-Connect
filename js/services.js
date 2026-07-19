@@ -504,8 +504,15 @@ async function submitHostRequest(payload) {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
-  const ref = await tracedAddDoc(collection(db, "hostRequests"), request);
-  return ref.id;
+
+  if (payload.type === "schoolRepresentative") {
+    const docId = `schoolRepresentative_${user.uid}`;
+    await tracedSetDoc(doc(db, "hostRequests", docId), request, { merge: true });
+    return docId;
+  } else {
+    const ref = await tracedAddDoc(collection(db, "hostRequests"), request);
+    return ref.id;
+  }
 }
 
 // Submit core-member requests for one or more existing approved clubs.
@@ -588,22 +595,6 @@ async function updateHostRequestStatus(requestId, status) {
       status,
       updatedAt: serverTimestamp(),
     }, { merge: true });
-  }
-
-  if (requestData.type === "schoolRepresentative" && requestData.uid) {
-    if (status === "approved") {
-      // Grant the hostRole by merging into users/{uid}. Safe even if the document already exists.
-      await tracedSetDoc(doc(db, "users", requestData.uid), {
-        hostRole: "schoolRepresentative",
-        updatedAt: serverTimestamp(),
-      }, { merge: true });
-    } else {
-      // Rejected or revoked: remove hostRole so permissions don't persist.
-      await tracedUpdateDoc(doc(db, "users", requestData.uid), {
-        hostRole: deleteField(),
-        updatedAt: serverTimestamp(),
-      });
-    }
   }
 }
 
