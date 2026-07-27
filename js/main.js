@@ -264,9 +264,11 @@ export async function handleAction(action, dataset) {
   }
   if (action === "create-new-club-onboarding") {
     state.onboardingStep = "create-club";
+    renderAtTop();
   }
   if (action === "back-to-host-info") {
     state.onboardingStep = "host-info";
+    renderAtTop();
   }
   if (action === "submit-new-club") {
     if (!state.clubDraft.name || !state.clubDraft.category) {
@@ -375,16 +377,17 @@ export async function handleAction(action, dataset) {
     if (window.RVUFirebase && isSuperAdmin()) {
       state.dataLoading = true;
       render();
-      if (tab === "requests") state.hostRequests = await window.RVUFirebase.loadAdminTab(tab);
-      else if (tab === "flags") state.moderationFlags = await window.RVUFirebase.loadAdminTab(tab);
-      else if (tab === "users") state.allUsers = await window.RVUFirebase.loadAdminTab(tab);
-      else if (tab === "events") state.allEvents = await window.RVUFirebase.loadAdminTab(tab);
-      else if (tab === "announcements") state.allAnnouncements = await window.RVUFirebase.loadAdminTab(tab);
-      else if (tab === "contentReviews") state.contentReviews = await window.RVUFirebase.loadAdminTab(tab);
+      if (tab === "requests") state.hostRequests = (await window.RVUFirebase.loadAdminTab(tab)).docs;
+      else if (tab === "flags") state.moderationFlags = (await window.RVUFirebase.loadAdminTab(tab)).docs;
+      else if (tab === "users") state.allUsers = (await window.RVUFirebase.loadAdminTab(tab)).docs;
+      else if (tab === "events") state.allEvents = (await window.RVUFirebase.loadAdminTab(tab)).docs;
+      else if (tab === "announcements") state.allAnnouncements = (await window.RVUFirebase.loadAdminTab(tab)).docs;
+      else if (tab === "contentReviews") state.contentReviews = (await window.RVUFirebase.loadAdminTab(tab)).docs;
       state.dataLoading = false;
       render();
     }
   }
+
   if (action === "admin-create-club") {
     if (!isSuperAdmin()) return;
     state.clubDraft = defaultClubDraft();
@@ -464,12 +467,12 @@ export async function handleAction(action, dataset) {
     await updateClubLeadershipFromPrompt(dataset.docid, club);
   }
   if (action === "club-update-leadership") {
-    if (!window.RVUFirebase || !isSuperAdmin() || !dataset.docid) return;
+    if (!window.RVUFirebase || (!isSuperAdmin() && !isClubCore()) || !dataset.docid) return;
     const club = activeClub();
     await updateClubLeadershipFromPrompt(dataset.docid, club);
   }
   if (action === "club-assign-core") {
-    if (!window.RVUFirebase || !isSuperAdmin() || !dataset.docid) return;
+    if (!window.RVUFirebase || (!isSuperAdmin() && !isClubCore()) || !dataset.docid) return;
     const email = await promptUser("Core member RVU email (@rvu.edu.in)");
     if (!isAllowedRvuEmail(email)) return window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Core email must end with @rvu.edu.in.", type: "info" } }));
     const name = await promptUser("Core member name") || email;
@@ -598,11 +601,12 @@ export async function handleAction(action, dataset) {
     const date = document.getElementById("ce-date")?.value || "";
     const time = document.getElementById("ce-time")?.value || "";
     const location = document.getElementById("ce-location")?.value?.trim() || "";
-    if (!title || !description || !date || !time || !location) {
-      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Title, description, date, time and location are required.", type: "info" } }));
+    const link = document.getElementById("ce-link")?.value?.trim() || "";
+    if (!title || !description || !date || !time || !location || !link) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Title, description, date, time, location and external link are required.", type: "info" } }));
       return;
     }
-    const link = document.getElementById("ce-link")?.value?.trim() || "";
+
     const posterUrl = document.getElementById("ce-poster")?.value?.trim() || "";
     if (link && !/^https?:\/\//.test(link)) {
       window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Link must start with http:// or https://", type: "info" } }));
@@ -662,9 +666,14 @@ export async function handleAction(action, dataset) {
     const description = document.getElementById("ca-description")?.value?.trim();
     const tag = document.querySelector('input[name="ca-tag"]:checked')?.value || "Notice";
     const imageUrl = document.getElementById("ca-image")?.value?.trim() || "";
+    const link = document.getElementById("ca-link")?.value?.trim() || "";
 
     if (!title || !description) {
       window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Title and description are required.", type: "info" } }));
+      return;
+    }
+    if (link && !/^https?:\/\//.test(link)) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Link must start with http:// or https://", type: "info" } }));
       return;
     }
     if (imageUrl && !/^https?:\/\//.test(imageUrl)) {
@@ -679,6 +688,10 @@ export async function handleAction(action, dataset) {
       time: "Just now",
       status: "published",
     };
+    
+    if (link) {
+      payload.link = link;
+    }
 
     if (imageUrl) {
       payload.imageUrl = imageUrl;
@@ -749,6 +762,40 @@ export async function handleAction(action, dataset) {
     await window.RVUFirebase.deleteDocument("projects", dataset.docid);
     replaceCollection(projects, projects.filter(p => p.id !== dataset.docid));
   }
+  if (action === "delete-school-event") {
+    if (!window.RVUFirebase || (!isSuperAdmin() && !isSchoolRep()) || !dataset.docid) return;
+    if (!window.confirm("Delete this school event permanently?")) return;
+    await window.RVUFirebase.deleteDocument("events", dataset.docid);
+    replaceCollection(events, events.filter(e => e.id !== dataset.docid));
+    if (state.allEvents) state.allEvents = state.allEvents.filter(e => e.id !== dataset.docid);
+    renderAtTop();
+  }
+  if (action === "delete-school-announcement") {
+    if (!window.RVUFirebase || (!isSuperAdmin() && !isSchoolRep()) || !dataset.docid) return;
+    if (!window.confirm("Delete this school announcement permanently?")) return;
+    await window.RVUFirebase.deleteDocument("announcements", dataset.docid);
+    replaceCollection(announcements, announcements.filter(a => a.id !== dataset.docid));
+    if (state.allAnnouncements) state.allAnnouncements = state.allAnnouncements.filter(a => a.id !== dataset.docid);
+    renderAtTop();
+  }
+  if (action === "delete-club-event") {
+    if (!window.RVUFirebase || (!isSuperAdmin() && !isClubCore()) || !dataset.docid) return;
+    if (!window.confirm("Delete this club event permanently?")) return;
+    await window.RVUFirebase.deleteDocument("events", dataset.docid);
+    replaceCollection(events, events.filter(e => e.id !== dataset.docid));
+    if (state.allEvents) state.allEvents = state.allEvents.filter(e => e.id !== dataset.docid);
+    renderAtTop();
+  }
+  if (action === "delete-club-announcement") {
+    if (!window.RVUFirebase || (!isSuperAdmin() && !isClubCore()) || !dataset.docid) return;
+    if (!window.confirm("Delete this club announcement permanently?")) return;
+    await window.RVUFirebase.deleteDocument("announcements", dataset.docid);
+    replaceCollection(announcements, announcements.filter(a => a.id !== dataset.docid));
+    if (state.allAnnouncements) state.allAnnouncements = state.allAnnouncements.filter(a => a.id !== dataset.docid);
+    renderAtTop();
+  }
+
+
   if (action === "load-more") {
     if (!window.RVUFirebase) return;
     const collectionName = dataset.collection;
@@ -1013,14 +1060,7 @@ export async function handleAction(action, dataset) {
     await window.RVUFirebase.unfollowClub(dataset.docid);
     return;
   }
-  if (action === "rsvp-event") {
-    if (!window.RVUFirebase || !dataset.docid) return;
-    state.rsvps = [...(state.rsvps || []), { eventId: dataset.docid, title: dataset.title || "", status: "going", id: dataset.docid }];
-    render();
-    await window.RVUFirebase.rsvpEvent(dataset.docid, { title: dataset.title || "", status: "going" });
-    window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "RSVP saved.", type: "info" } }));
-    return;
-  }
+
   if (action === "flag-content") {
     if (!window.RVUFirebase || !dataset.docid) return;
     const reason = await promptUser("Why are you reporting this?");
@@ -1149,15 +1189,39 @@ export async function handleAction(action, dataset) {
         window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Please select your school in your profile first.", type: "error" } }));
         return;
       }
+      state._schoolRepApplyModalOpen = true;
+      renderAtTop();
+    }
+    return;
+  }
+  
+  if (action === "close-school-rep-apply-modal") {
+    state._schoolRepApplyModalOpen = false;
+    renderAtTop();
+    return;
+  }
+  
+  if (action === "submit-school-rep-apply") {
+    if (window.RVUFirebase) {
+      const reason = document.getElementById("sr-reason")?.value?.trim() || "";
+      const dean = document.querySelector('input[name="sr-dean"]:checked')?.value;
+      if (!reason || !dean) {
+        window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Please provide a reason and confirm dean discussion.", type: "error" } }));
+        return;
+      }
+      
       try {
         await window.RVUFirebase.submitHostRequest({
           type: "schoolRepresentative",
           schoolId: state.user.school,
           name: state.user.name,
           roleTitle: "Student Representative",
-          description: "Student applying for School Representative role.",
+          description: reason,
+          deanDiscussed: dean === "Yes",
           approver: "Super Admin",
         });
+        state._schoolRepApplyModalOpen = false;
+        renderAtTop();
         window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "School rep application submitted for review.", type: "success" } }));
       } catch (e) {
         window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Failed to apply.", type: "error" } }));

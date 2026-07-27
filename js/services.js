@@ -103,13 +103,6 @@ function ruleTraceFor(path, operation, payload = {}) {
     rule = "match /siteSettings/{settingId}";
     checks.push("write requires isSuperAdmin()");
     category = "role mismatch";
-  } else if (path.startsWith("schools/") && path.includes("/representatives/")) {
-    rule = "match /schools/{schoolId}/representatives/{uid}";
-    checks.push("create requires representative uid path segment to equal auth.uid");
-    checks.push("create payload.status must equal 'pending'");
-    checks.push("create payload.email must equal request.auth.token.email");
-    checks.push("update/delete require isSuperAdmin()");
-    category = "ownership mismatch, incorrect payload, or role mismatch";
   } else if (path.startsWith("schools/")) {
     rule = "match /schools/{schoolId}";
     checks.push("create/update/delete require isSuperAdmin()");
@@ -133,7 +126,7 @@ function ruleTraceFor(path, operation, payload = {}) {
     rule = "match /events/{eventId}";
     checks.push("create requires payload.createdBy == auth.uid");
     checks.push("hostType club requires approved core doc at clubs/{clubId}/coreMembers/{auth.email}");
-    checks.push("hostType school requires users/{uid}.hostRole == 'schoolRepresentative'");
+    checks.push("hostType school requires approved hostRequests/schoolRepresentative_{uid} with status == 'approved'");
     checks.push("super admin can create/update/delete");
     checks.push("non-admin update must not change createdBy or createdAt");
     category = "ownership mismatch, role mismatch, incorrect document path, or incorrect payload";
@@ -141,7 +134,7 @@ function ruleTraceFor(path, operation, payload = {}) {
     rule = "match /announcements/{announcementId}";
     checks.push("create requires payload.createdBy == auth.uid");
     checks.push("sourceType club requires approved core doc at clubs/{clubId}/coreMembers/{auth.email}");
-    checks.push("sourceType school requires users/{uid}.hostRole == 'schoolRepresentative'");
+    checks.push("sourceType school requires approved hostRequests/schoolRepresentative_{uid} with status == 'approved'");
     checks.push("super admin can create/update/delete");
     checks.push("non-admin update must not change createdBy or createdAt");
     category = "ownership mismatch, role mismatch, incorrect document path, or incorrect payload";
@@ -426,20 +419,8 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
       }
     }
 
-    const schoolRepSnaps = await Promise.all([
-      getDocs(query(collectionGroup(db, "representatives"), where("uid", "==", uid))).catch(() => ({ docs: [] })),
-      getDocs(query(collectionGroup(db, "representatives"), where("email", "==", email))).catch(() => ({ docs: [] })),
-    ]);
     const schoolAccesses = [];
-    const seenRepRefs = new Set();
-    for (const doc of schoolRepSnaps.flatMap((snap) => snap.docs)) {
-      if (seenRepRefs.has(doc.ref.path)) continue;
-      seenRepRefs.add(doc.ref.path);
-      const representative = { id: doc.id, ...doc.data() };
-      if (representative.status !== "approved") continue;
-      const schoolId = doc.ref.parent.parent?.id;
-      schoolAccesses.push({ schoolId, representative });
-    }
+
     
     for (const request of ownHostRequests.filter((item) => item.status === "approved")) {
       if (request.type === "clubCore" && request.clubId && !memberDocs.some((access) => access.club.id === request.clubId || access.club.slug === request.clubId)) {
@@ -844,27 +825,6 @@ async function unfollowClub(clubId) {
   await tracedDeleteDoc(ref);
 }
 
-async function rsvpEvent(eventId, payload = {}) {
-  const user = auth.currentUser;
-  if (!user) throw new Error("Sign in first.");
-  const batch = tracedWriteBatch("rsvpEvent");
-  batch.set(doc(db, "events", eventId, "rsvps", user.uid), {
-    userId: user.uid,
-    email: user.email,
-    status: payload.status || "going",
-    checkedIn: false,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  }, { merge: true });
-  batch.set(doc(db, "users", user.uid, "rsvps", eventId), {
-    eventId,
-    title: payload.title || "",
-    status: payload.status || "going",
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  }, { merge: true });
-  await batch.commit();
-}
 async function flagContent(payload) {
   const user = auth.currentUser;
   if (!user) throw new Error("Sign in first.");
@@ -881,6 +841,11 @@ async function flagContent(payload) {
 
 async function getEventRSVPs(eventId) {
   const snap = await getDocs(collection(db, "events", eventId, "rsvps"));
+  return rows(snap);
+}
+
+async function getProjectApplicants(projectId) {
+  const snap = await getDocs(collection(db, "projects", projectId, "applications"));
   return rows(snap);
 }
 
@@ -1049,7 +1014,7 @@ window.RVUFirebase = {
   loadCampusData,
   loadMore,
   loadAdminTab,
-  rsvpEvent,
+
   saveUserProfile,
   updateUserProfile: saveUserProfile,
   saveItem,
@@ -1076,6 +1041,7 @@ window.RVUFirebase = {
   updateUserRole,
   removeClubCoreRole,
   getEventRSVPs,
+  getProjectApplicants,
   signInWithGoogle,
   signOut: () => {
     _cachedSuperAdminResult = null;
