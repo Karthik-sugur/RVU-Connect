@@ -151,12 +151,26 @@ export function renderSchoolAdmin() {
         <article class="admin-card">
           <span class="section-num">Notice</span>
           <h2>School announcements</h2>
-          ${announcements.filter((item) => item.sourceType === "school" || item.type === "Faculty").slice(0, 3).map((item) => adminRow(item.title, `${escapeHtml(item.source || "School")} · ${escapeHtml(item.tag || "Update")}`, ["Edit", "Archive"])).join("") || renderEmptyState("No school announcements", "Published school announcements will appear here.")}
+          ${announcements.filter((item) => item.sourceType === "school" || item.type === "Faculty").slice(0, 3).map((item) => `
+            <div class="admin-row">
+              <div><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.source || "School")} · ${escapeHtml(item.tag || "Update")}</span></div>
+              <div class="admin-row-actions">
+                <button data-action="delete-school-announcement" data-docid="${item.id}">Delete</button>
+              </div>
+            </div>
+          `).join("") || renderEmptyState("No school announcements", "Published school announcements will appear here.")}
         </article>
         <article class="admin-card">
           <span class="section-num">Events</span>
           <h2>Event controls</h2>
-          ${schoolEvents.slice(0, 3).map((event) => adminRow(event.title, `${event.host || "School"} · ${event.date || ""} · ${escapeHtml(event.location || "")}`, ["Edit", "Archive"])).join("") || renderEmptyState("No school events", "Create a school event to see it here.")}
+          ${schoolEvents.slice(0, 3).map((event) => `
+            <div class="admin-row">
+              <div><strong>${escapeHtml(event.title)}</strong><span>${event.host || "School"} · ${event.date || ""} · ${escapeHtml(event.location || "")}</span></div>
+              <div class="admin-row-actions">
+                <button data-action="delete-school-event" data-docid="${event.id}">Delete</button>
+              </div>
+            </div>
+          `).join("") || renderEmptyState("No school events", "Create a school event to see it here.")}
         </article>
         <article class="admin-card">
           <span class="section-num">Rules</span>
@@ -210,7 +224,24 @@ export function renderClubAdmin() {
         <article class="admin-card">
           <span class="section-num">Host</span>
           <h2>Club posting</h2>
-          ${[...clubEvents.map((event) => ({ title: event.title, meta: `Event · ${event.date || ""}` })), ...clubAnnouncements.map((item) => ({ title: item.title, meta: `Announcement · ${escapeHtml(item.tag || "Update")}` }))].slice(0, 4).map((item) => adminRow(item.title, item.meta, ["Edit", "Archive"])).join("") || renderEmptyState("No club posts", "Create an event or announcement to manage it here.")}
+          ${[
+            ...clubEvents.map(event => `
+              <div class="admin-row">
+                <div><strong>${escapeHtml(event.title)}</strong><span>Event · ${event.date || ""}</span></div>
+                <div class="admin-row-actions">
+                  <button data-action="delete-club-event" data-docid="${event.id}">Delete</button>
+                </div>
+              </div>
+            `),
+            ...clubAnnouncements.map(item => `
+              <div class="admin-row">
+                <div><strong>${escapeHtml(item.title)}</strong><span>Announcement · ${escapeHtml(item.tag || "Update")}</span></div>
+                <div class="admin-row-actions">
+                  <button data-action="delete-club-announcement" data-docid="${item.id}">Delete</button>
+                </div>
+              </div>
+            `),
+          ].slice(0, 4).join("") || renderEmptyState("No club posts", "Create an event or announcement to manage it here.")}
         </article>
         <article class="admin-card">
           <span class="section-num">Apply</span>

@@ -1,4 +1,4 @@
-import { icon, multiSelectField, selectField, inputField, clubInputField, clubSelectField, clubTextArea, unique, escapeHtml } from './utils.js';
+import { icon, multiSelectField, selectField, inputField, clubInputField, clubSelectField, clubTextArea, unique, escapeHtml, modalSelectField } from './utils.js';
 import { schools, interests, events, clubs, announcements, projects, state, app } from './state.js';
 import { isClubCore, isSchoolRep, isSuperAdmin, canHost, roleLabel, activeClub } from './auth.js';
 import { bindEvents } from './main.js';
@@ -38,24 +38,14 @@ export function renderCreateEventModal() {
 
         <div style="padding:24px;">
 
-          ${isClubCore() && state.host.clubAccesses && state.host.clubAccesses.length > 1 ? `
-          <div style="margin-bottom:20px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Hosting Club *</label>
-            <select id="ce-host-club" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;">
-              ${state.host.clubAccesses.map(access => `<option value="${access.club.id || access.club.slug}">${escapeHtml(access.club.name)}</option>`).join("")}
-            </select>
-          </div>` : (myClub ? `
+          ${isClubCore() && state.host.clubAccesses && state.host.clubAccesses.length > 1
+            ? modalSelectField("ce-host-club", "Hosting Club *", state.host.clubAccesses.map(a => ({ value: a.club.id || a.club.slug, label: a.club.name })), "")
+            : (myClub ? `
           <div style="background:#e8e0d4;padding:10px 14px;margin-bottom:20px;border-left:3px solid #D7AC54;">
             <p style="font-size:12px;font-weight:600;color:#5a4a3a;margin:0;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;">Posting as ${escapeHtml(myClub.name)}</p>
           </div>` : "")}
 
-          ${isSchoolRep() ? `
-          <div style="margin-bottom:20px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">School *</label>
-            <select id="ce-host-school" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;">
-              ${schools.map(s => `<option value="${escapeHtml(s)}" ${state.host.school === s ? "selected" : ""}>${escapeHtml(s)}</option>`).join("")}
-            </select>
-          </div>` : ""}
+          ${isSchoolRep() ? modalSelectField("ce-host-school", "School *", schools, state.host.school) : ""}
 
           <div style="margin-bottom:20px;">
             <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Event Title *</label>
@@ -84,7 +74,7 @@ export function renderCreateEventModal() {
           </div>
 
           <div style="margin-bottom:20px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Registration / External Link </label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Registration / External Link *</label>
             <input id="ce-link" type="url" placeholder="https://forms.google.com/..." style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
           </div>
 
@@ -187,13 +177,7 @@ export function renderCreateAnnouncementModal() {
             </div>
           </div>
 
-          ${isSchoolRep() ? `
-          <div style="margin-bottom:20px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">School *</label>
-            <select id="ca-host-school" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;">
-              ${schools.map(s => `<option value="${escapeHtml(s)}" ${state.host.school === s ? "selected" : ""}>${escapeHtml(s)}</option>`).join("")}
-            </select>
-          </div>` : ""}
+          ${isSchoolRep() ? modalSelectField("ca-host-school", "School *", schools, state.host.school) : ""}
 
           <div style="margin-bottom:20px;">
             <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Title *</label>
@@ -203,6 +187,11 @@ export function renderCreateAnnouncementModal() {
           <div style="margin-bottom:20px;">
             <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Description *</label>
             <textarea id="ca-description" placeholder="Full details of the announcement..." style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;resize:vertical;min-height:100px;"></textarea>
+          </div>
+
+          <div style="margin-bottom:24px;">
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">External Link (optional)</label>
+            <input id="ca-link" type="url" placeholder="https://..." style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
           </div>
 
           <div style="margin-bottom:24px;">
@@ -709,11 +698,7 @@ export function renderEventDetail() {
 
         ${!isPast && !isCancelled ? `
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:24px;">
-            ${event.link
-        ? `<a href="${escapeHtml(event.link)}" target="_blank" rel="noopener" style="background:#D7AC54;color:#1a1a1a;border:none;padding:12px 24px;font-size:12px;font-weight:800;font-family:inherit;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:6px;">Register / Join →</a>`
-        : `<button style="background:#D7AC54;color:#1a1a1a;border:none;padding:12px 24px;font-size:12px;font-weight:800;font-family:inherit;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;" data-action="rsvp-event" data-docid="${event.id}" data-title="${escapeHtml(event.title)}">RSVP</button>`
-      }
-            <button style="background:none;border:1.5px solid #c8b89a;color:#5a4a3a;padding:12px 18px;font-size:12px;font-weight:700;font-family:inherit;letter-spacing:0.05em;text-transform:uppercase;cursor:pointer;" data-action="calendar-event" data-docid="${event.id}">+ Calendar</button>
+            ${event.link ? `<a href="${escapeHtml(event.link)}" target="_blank" rel="noopener" style="background:#D7AC54;color:#1a1a1a;border:none;padding:12px 24px;font-size:12px;font-weight:800;font-family:inherit;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:6px;">Join →</a>` : ""}
             <button style="background:none;border:1.5px solid #c8b89a;color:#5a4a3a;padding:12px 18px;font-size:12px;font-weight:700;font-family:inherit;letter-spacing:0.05em;text-transform:uppercase;cursor:pointer;" data-action="save-item" data-docid="${event.id}" data-kind="event" data-title="${escapeHtml(event.title)}">Save</button>
           </div>` : ""}
 
@@ -1097,7 +1082,13 @@ export function renderAnnouncementDetail() {
 
         <div style="height:1px;background:#d8cfc4;margin-bottom:16px;"></div>
 
+        ${item.link ? `
+          <div style="margin-bottom:24px;">
+            <a href="${escapeHtml(item.link)}" target="_blank" rel="noopener" style="background:#D7AC54;color:#1a1a1a;border:none;padding:12px 24px;font-size:12px;font-weight:800;font-family:inherit;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:6px;">Join / Learn More →</a>
+          </div>` : ""}
+
         <div style="display:flex;align-items:center;justify-content:space-between;">
+
           <p style="font-size:12px;color:#8a7a6a;margin:0;font-family:inherit;">Posted by ${escapeHtml(item.source || "")} · ${escapeHtml(item.time || "")}</p>
           <button style="background:none;border:none;color:#a09080;font-size:11px;font-family:inherit;cursor:pointer;text-transform:uppercase;letter-spacing:0.05em;" data-action="flag-content" data-docid="${item.id}" data-kind="announcement" data-title="${escapeHtml(item.title)}">Report</button>
         </div>
@@ -1269,7 +1260,8 @@ export function renderProfile() {
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           ${(state.clubApplications.filter(a => a.status === 'pending').length < 5) ? `
-            <button style="background:none;border:1.5px solid #D7AC54;color:#8a6a2a;padding:6px 16px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;" data-action="open-club-apply-modal">Apply for Club Core</button>
+            <button style="background:none;border:1.5px solid #D7AC54;color:#8a6a2a;padding:6px 16px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;" data-action="open-club-apply-modal">Apply to existing club</button>
+            <button style="background:none;border:1.5px solid #D7AC54;color:#8a6a2a;padding:6px 16px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;" data-action="create-new-club-onboarding">Create new club</button>
           ` : ""}
           <button style="background:none;border:1.5px solid #D7AC54;color:#8a6a2a;padding:6px 16px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;" data-action="start-school-rep-apply">Apply as School Rep</button>
 
@@ -1293,7 +1285,6 @@ export function renderProfile() {
   )}` : ""}
       ${section("My Interests", interestContent)}
       ${section("Clubs I Follow", followContent)}
-      ${section("My RSVPs", rsvpContent)}
       ${section("My Club Applications", clubAppsContent)}
       ${section("Saved Items", savedContent)}
 
@@ -1301,7 +1292,45 @@ export function renderProfile() {
     ${state.editProfileOpen ? renderEditProfileModal() : ""}
     ${state._profileInterestsOpen ? renderProfileInterestsModal() : ""}
     ${state._clubApplyModalOpen ? renderClubApplyModal() : ""}
+    ${state._schoolRepApplyModalOpen ? renderSchoolRepApplyModal() : ""}
 
+  `;
+}
+
+export function renderSchoolRepApplyModal() {
+  return `
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px 0 80px;">
+      <div style="background:#f5f2ec;width:100%;max-width:500px;margin:0 16px;">
+        <div style="padding:24px 24px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1.5px solid #d8cfc4;">
+          <h2 style="font-size:18px;font-weight:800;color:#1a1a1a;margin:0;font-family:inherit;text-transform:uppercase;letter-spacing:0.03em;">Apply as School Rep</h2>
+          <button style="background:none;border:none;font-size:20px;color:#8a7a6a;cursor:pointer;" data-action="close-school-rep-apply-modal">×</button>
+        </div>
+        <div style="padding:24px;">
+          <p style="font-size:13px;color:#5a4a3a;margin:0 0 20px;font-family:inherit;line-height:1.6;">
+            <strong>Note:</strong> Your application will be reviewed by the Super Admin before approval.
+          </p>
+          <div style="margin-bottom:20px;">
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Reason for applying *</label>
+            <textarea id="sr-reason" placeholder="Why do you want to be a School Representative?" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;resize:vertical;min-height:100px;"></textarea>
+          </div>
+          <div style="margin-bottom:24px;">
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Have you discussed this with your Dean / Dean of Student Affairs? *</label>
+            <div style="display:flex;gap:12px;">
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;font-family:inherit;color:#1a1a1a;">
+                <input type="radio" name="sr-dean" value="Yes" style="accent-color:#D7AC54;" /> Yes
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;font-family:inherit;color:#1a1a1a;">
+                <input type="radio" name="sr-dean" value="No" style="accent-color:#D7AC54;" /> No
+              </label>
+            </div>
+          </div>
+          <div style="display:flex;gap:10px;">
+            <button style="flex:1;background:#D7AC54;color:#1a1a1a;border:none;padding:12px;font-size:12px;font-weight:800;font-family:inherit;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;" data-action="submit-school-rep-apply">Submit Application</button>
+            <button style="background:none;border:1.5px solid #c8b89a;color:#5a4a3a;padding:12px 20px;font-size:12px;font-weight:700;font-family:inherit;letter-spacing:0.05em;text-transform:uppercase;cursor:pointer;" data-action="close-school-rep-apply-modal">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
   `;
 }
 
@@ -1375,12 +1404,7 @@ export function renderEditProfileModal() {
             <input id="ep-name" type="text" value="${escapeHtml(state.user.name || "")}" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
           </div>
 
-          <div style="margin-bottom:16px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">School</label>
-            <select id="ep-school" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;">
-              ${schools.map(s => `<option value="${escapeHtml(s)}" ${state.user.school === s ? "selected" : ""}>${escapeHtml(s)}</option>`).join("")}
-            </select>
-          </div>
+          ${modalSelectField("ep-school", "School", schools, state.user.school)}
 
           <div style="margin-bottom:24px;">
             <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Year</label>
@@ -1636,8 +1660,7 @@ export function renderOnboarding() {
               <span style="font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;">OR</span>
               <div style="flex:1;height:1.5px;background:#e8e0d4;"></div>
             </div>
-            <!-- <button class="btn secondary" style="width:100%;margin-bottom:16px;" data-action="create-new-club-onboarding">Create a New Club Instead</button> -->
-            <p style="font-size:12px;color:#8a7a6a;text-align:center;font-family:inherit;">Note: New club creation is temporarily disabled. Select an existing club.</p>
+            <button class="btn secondary" style="width:100%;margin-bottom:16px;" data-action="create-new-club-onboarding">Create new club</button>
           </div>
           <div class="form-grid two">
             ${inputField("hostRoleTitle", "Role (for selected clubs)", state.host.roleTitle)}

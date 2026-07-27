@@ -136,6 +136,27 @@ export function selectField(name, label, options, value) {
   `;
 }
 
+// Reusable dropdown for modal forms.
+// Preserves the exact inline styles used across Create Event / Announcement / Edit Profile.
+// opts: array of { value, label } objects OR plain strings (value === label).
+// selected: the currently selected value.
+export function modalSelectField(id, labelText, opts, selected) {
+  const options = opts.map((o) => {
+    const val = typeof o === "string" ? o : o.value;
+    const txt = typeof o === "string" ? o : o.label;
+    return `<option value="${escapeHtml(val)}" ${val === selected ? "selected" : ""}>${escapeHtml(txt)}</option>`;
+  }).join("");
+  return `
+    <div style="margin-bottom:20px;">
+      <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">${labelText}</label>
+      <select id="${id}" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;">
+        ${options}
+      </select>
+    </div>
+  `;
+}
+
+
 export function inputField(name, label, value, type = "text") {
   return `
     <div class="field">
