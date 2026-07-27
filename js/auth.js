@@ -111,6 +111,7 @@ export async function syncFirebaseData() {
     state.host.name = data.schoolAccess.representative.name || state.host.name;
     state.host.approved = true;
     state.onboardingStep = null;
+  }
   state.dataLoaded = true;
   state.dataLoading = false;
 }
