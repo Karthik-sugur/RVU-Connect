@@ -246,7 +246,7 @@ export function renderAuthModal() {
       <section class="modal auth-modal">
         <p class="eyebrow">RVU account</p>
         <h2>Sign in</h2>
-        <p>Use your RVU email to continue. Role selection happens after authentication.</p>
+        <p>Sign in with your Google account to continue. Role selection happens after authentication.</p>
         <div class="auth-actions" style="margin-top:24px;">
           <button class="btn gold" style="width:100%;" data-action="login-google">Continue with Google</button>
           <button class="btn ghost" style="width:100%;" data-action="close-login">Cancel</button>
@@ -300,7 +300,7 @@ export function renderAppShell() {
       ${state.isDemoMode ? `
         <div style="background:#1a1a1a;border-bottom:1.5px solid #D7AC54;padding:8px 20px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:56px;z-index:90;">
           <p style="font-size:12px;font-weight:600;color:#D7AC54;margin:0;font-family:inherit;text-transform:uppercase;letter-spacing:0.08em;">
-            ⚠ Demo Mode — No data is being saved. Sign in with your RVU email to access your account.
+            ⚠ Demo Mode — No data is being saved. Sign in with your Google account to access your account.
           </p>
           <button style="background:#D7AC54;color:#1a1a1a;border:none;padding:4px 14px;font-size:11px;font-weight:800;font-family:inherit;letter-spacing:0.05em;text-transform:uppercase;cursor:pointer;" data-action="open-login">Sign In</button>
         </div>` : ""}

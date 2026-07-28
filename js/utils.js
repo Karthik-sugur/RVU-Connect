@@ -227,7 +227,7 @@ export function validateClubDraft() {
     ["currentPresidentEmail", "Current president email"],
   ];
   const invalid = emails.find(([key]) => !isAllowedRvuEmail(state.clubDraft[key]));
-  if (invalid) return `${invalid[1]} must end with @rvu.edu.in.`;
+  if (invalid) return `${invalid[1]} must be a valid email.`;
   return "";
 }
 

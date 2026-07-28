@@ -61,11 +61,11 @@ export function renderCreateClubPage() {
         <h2>Founding roles</h2>
         <div class="form-grid two">
           ${clubInputField("founderName", "Founder name", draft.founderName)}
-          ${clubInputField("founderEmail", "Founder RVU email", draft.founderEmail, "name@rvu.edu.in", "email")}
+          ${clubInputField("founderEmail", "Founder email", draft.founderEmail, "name@example.com", "email")}
           ${clubInputField("facultyAdvisorName", "Faculty advisor name", draft.facultyAdvisorName)}
-          ${clubInputField("facultyAdvisorEmail", "Faculty advisor RVU email", draft.facultyAdvisorEmail, "name@rvu.edu.in", "email")}
+          ${clubInputField("facultyAdvisorEmail", "Faculty advisor email", draft.facultyAdvisorEmail, "name@example.com", "email")}
           ${clubInputField("currentPresidentName", "Current president name", draft.currentPresidentName)}
-          ${clubInputField("currentPresidentEmail", "Current president RVU email", draft.currentPresidentEmail, "name@rvu.edu.in", "email")}
+          ${clubInputField("currentPresidentEmail", "Current president email", draft.currentPresidentEmail, "name@example.com", "email")}
         </div>
         <label class="check-row">
           <input type="checkbox" data-club-check="registrationOpen" ${draft.registrationOpen ? "checked" : ""} />
