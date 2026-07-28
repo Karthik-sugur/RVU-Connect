@@ -69,12 +69,12 @@ export async function renderCurrentRoute() {
     if (needsLoad) {
       state.dataLoading = true;
       renderAtTop();
-      if (tab === "requests") state.hostRequests = await window.RVUFirebase.loadAdminTab(tab);
-      else if (tab === "flags") state.moderationFlags = await window.RVUFirebase.loadAdminTab(tab);
-      else if (tab === "users") state.allUsers = await window.RVUFirebase.loadAdminTab(tab);
-      else if (tab === "events") state.allEvents = await window.RVUFirebase.loadAdminTab(tab);
-      else if (tab === "announcements") state.allAnnouncements = await window.RVUFirebase.loadAdminTab(tab);
-      else if (tab === "contentReviews") state.contentReviews = await window.RVUFirebase.loadAdminTab(tab);
+      if (tab === "requests") state.hostRequests = (await window.RVUFirebase.loadAdminTab(tab)).docs || [];
+      else if (tab === "flags") state.moderationFlags = (await window.RVUFirebase.loadAdminTab(tab)).docs || [];
+      else if (tab === "users") state.allUsers = (await window.RVUFirebase.loadAdminTab(tab)).docs || [];
+      else if (tab === "events") state.allEvents = (await window.RVUFirebase.loadAdminTab(tab)).docs || [];
+      else if (tab === "announcements") state.allAnnouncements = (await window.RVUFirebase.loadAdminTab(tab)).docs || [];
+      else if (tab === "contentReviews") state.contentReviews = (await window.RVUFirebase.loadAdminTab(tab)).docs || [];
       state.dataLoading = false;
     }
   }
