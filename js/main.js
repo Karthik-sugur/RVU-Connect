@@ -358,13 +358,17 @@ export async function handleAction(action, dataset) {
   if (action === "approve-host") {
     if (window.RVUFirebase && dataset.request) {
       await window.RVUFirebase.updateHostRequestStatus(dataset.request, "approved");
-      /* removed syncFirebaseData */
+      const item = state.hostRequests.find((r) => r.id === dataset.request);
+      if (item) item.status = "approved";
+      render();
     }
   }
   if (action === "reject-host") {
     if (window.RVUFirebase && dataset.request) {
       await window.RVUFirebase.updateHostRequestStatus(dataset.request, "rejected");
-      /* removed syncFirebaseData */
+      const item = state.hostRequests.find((r) => r.id === dataset.request);
+      if (item) item.status = "rejected";
+      render();
     }
   }
   if (action === "sign-out") {

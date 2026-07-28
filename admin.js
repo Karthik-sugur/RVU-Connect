@@ -217,9 +217,25 @@ function downloadCSV(filename, rows) {
 }
 
 async function loadAdminData() {
-  const data = applyDemoCampusData(await window.RVUFirebase.loadCampusData({ superAdmin: true }));
+  const campusData = await window.RVUFirebase.loadCampusData({ superAdmin: true });
+
+  let liveHostRequests = null;
+  try {
+    const reqRes = await window.RVUFirebase.loadAdminTab("requests");
+    if (reqRes && Array.isArray(reqRes.docs)) {
+      liveHostRequests = reqRes.docs;
+    }
+  } catch (err) {
+    console.warn("Could not fetch live host requests:", err);
+  }
+
+  const data = applyDemoCampusData({
+    ...campusData,
+    hostRequests: liveHostRequests !== null ? liveHostRequests : campusData.hostRequests,
+  });
+
   state.data = {
-    hostRequests: data.hostRequests || [],
+    hostRequests: liveHostRequests !== null ? liveHostRequests : (data.hostRequests || []),
     moderationFlags: data.moderationFlags || [],
     allUsers: data.allUsers || [],
     allEvents: data.allEvents || [],
@@ -230,6 +246,7 @@ async function loadAdminData() {
     siteSettings: data.siteSettings || [],
     projects: data.projects || [],
   };
+  state.loadedAdminTabs = { requests: true };
   const platform = state.data.siteSettings.find((item) => item.id === "platform");
   if (platform) {
     state.forms.settings = {
@@ -885,7 +902,10 @@ async function handleAction(action, id) {
     return;
   }
   if (action === "approve-request" || action === "reject-request") {
-    await window.RVUFirebase.updateHostRequestStatus(id, action === "approve-request" ? "approved" : "rejected");
+    const newStatus = action === "approve-request" ? "approved" : "rejected";
+    await window.RVUFirebase.updateHostRequestStatus(id, newStatus);
+    const item = state.data?.hostRequests?.find((r) => r.id === id);
+    if (item) item.status = newStatus;
     await refresh();
     showToast("Request updated.");
     return;
@@ -1127,7 +1147,7 @@ function bindEvents() {
     button.addEventListener("click", async () => {
       const tab = button.dataset.tab;
       state.tab = tab;
-      
+
       const mapping = {
         requests: "hostRequests",
         flags: "moderationFlags",
@@ -1137,16 +1157,18 @@ function bindEvents() {
         review: "contentReviews"
       };
       const field = mapping[tab];
-      if (field && state.data[field].length === 0) {
+      state.loadedAdminTabs = state.loadedAdminTabs || {};
+      if (field && !state.loadedAdminTabs[tab]) {
         state.loading = true;
         render();
         const res = await window.RVUFirebase.loadAdminTab(tab);
         state.data[field] = res.docs;
         state.adminCursors = state.adminCursors || {};
         state.adminCursors[tab] = res.lastDocId;
+        state.loadedAdminTabs[tab] = true;
         state.loading = false;
       }
-      
+
       render();
       window.scrollTo({ top: 0, left: 0, behavior: "instant" });
     });
