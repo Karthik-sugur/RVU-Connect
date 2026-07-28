@@ -560,22 +560,78 @@ async function updateHostRequestStatus(requestId, status) {
   const requestRef = doc(db, "hostRequests", requestId);
   const requestSnap = await getDoc(requestRef);
   const requestData = requestSnap.exists() ? requestSnap.data() : {};
-  await tracedUpdateDoc(requestRef, {
+
+  await tracedSetDoc(requestRef, {
     status,
     updatedAt: serverTimestamp()
-  });
+  }, { merge: true });
 
-  const memberEmail = requestData.email;
-  const normalizedEmail = requestData.email?.trim().toLowerCase();
-  if (requestData.type === "clubCore" && requestData.clubId && memberEmail) {
-    await tracedSetDoc(doc(db, "clubs", requestData.clubId, "coreMembers", memberEmail), {
-      uid: requestData.uid,
-      email: memberEmail,
-      name: requestData.name || memberEmail.split("@")[0],
-      role: requestData.roleTitle || "core",
-      status,
-      updatedAt: serverTimestamp(),
-    }, { merge: true });
+  if (status === "approved") {
+    const memberEmail = requestData.email;
+    const normalizedEmail = memberEmail?.trim().toLowerCase();
+
+    // 1. Club core request approval
+    if (requestData.type === "clubCore" && requestData.clubId && normalizedEmail) {
+      await tracedSetDoc(doc(db, "clubs", requestData.clubId, "coreMembers", normalizedEmail), {
+        uid: requestData.uid || "",
+        email: normalizedEmail,
+        name: requestData.name || normalizedEmail.split("@")[0],
+        role: requestData.roleTitle || "core",
+        status: "approved",
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+
+      if (requestData.uid) {
+        await tracedSetDoc(doc(db, "users", requestData.uid), {
+          role: "clubCore",
+          updatedAt: serverTimestamp(),
+        }, { merge: true });
+      }
+    }
+
+    // 2. School representative request approval
+    if (requestData.type === "schoolRepresentative" && requestData.uid) {
+      await tracedSetDoc(doc(db, "users", requestData.uid), {
+        role: "schoolRep",
+        schoolScope: requestData.schoolId || "",
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+    }
+
+    // 3. New club creation request approval
+    if (requestData.type === "newClub") {
+      const clubId = requestData.clubId || (requestData.clubName ? requestData.clubName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") : null);
+      if (clubId) {
+        await tracedSetDoc(doc(db, "clubs", clubId), {
+          name: requestData.clubName || "",
+          category: requestData.clubCategory || "General",
+          school: requestData.clubSchool || "RVU",
+          description: requestData.clubDescription || "",
+          tagline: requestData.clubTagline || "",
+          status: "approved",
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        }, { merge: true });
+
+        if (normalizedEmail) {
+          await tracedSetDoc(doc(db, "clubs", clubId, "coreMembers", normalizedEmail), {
+            uid: requestData.uid || "",
+            email: normalizedEmail,
+            name: requestData.name || requestData.founderName || normalizedEmail.split("@")[0],
+            role: requestData.roleTitle || "President",
+            status: "approved",
+            updatedAt: serverTimestamp(),
+          }, { merge: true });
+        }
+
+        if (requestData.uid) {
+          await tracedSetDoc(doc(db, "users", requestData.uid), {
+            role: "clubCore",
+            updatedAt: serverTimestamp(),
+          }, { merge: true });
+        }
+      }
+    }
   }
 }
 
@@ -971,7 +1027,8 @@ async function loadAdminTab(tabName, lastDocId = null) {
     users: "users",
     events: "events",
     announcements: "announcements",
-    contentReviews: "contentReviews"
+    contentReviews: "contentReviews",
+    review: "contentReviews"
   };
   
   const colName = map[tabName];
