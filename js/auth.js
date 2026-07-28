@@ -45,7 +45,7 @@ export function activeClub() {
 }
 
 export function isAllowedRvuEmail(email) {
-  return typeof email === "string" && email.trim().toLowerCase().endsWith("@rvu.edu.in");
+  return typeof email === "string" && email.trim().includes("@");
 }
 
 export async function syncFirebaseData() {

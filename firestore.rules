@@ -8,8 +8,7 @@ service cloud.firestore {
 
     function isRvuEmail() {
       return signedIn()
-        && request.auth.token.email is string
-        && request.auth.token.email.matches('.*@rvu\\.edu\\.in$');
+        && request.auth.token.email is string;
     }
 
     function isSuperAdmin() {
