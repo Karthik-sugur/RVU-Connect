@@ -509,8 +509,8 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
       }
     }
 
-    // Fallback: users.role = schoolRepresentative (e.g. set directly in Firestore).
-    if (!schoolAccesses.length && (profile.role === "schoolRepresentative" || profile.role === "schoolRep")) {
+    // Sticky flag / role also unlocks school-rep UI (survives clubCore role overwrites).
+    if (!schoolAccesses.length && (profile.schoolRepApproved === true || profile.role === "schoolRepresentative" || profile.role === "schoolRep")) {
       schoolAccesses.push({
         schoolId: profile.schoolScope || profile.school || "",
         representative: {
@@ -523,6 +523,16 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
         },
       });
     }
+
+    // Keep both grants in sync after separate approvals (no manual Repair on every login).
+    await syncDualRoleGrants({
+      uid,
+      profile,
+      ownHostRequests,
+      hasClubAccess: memberDocs.length > 0,
+      hasSchoolAccess: schoolAccesses.length > 0,
+    });
+
     data.clubAccesses = memberDocs;
     data.clubAccess = memberDocs[0] || null;
     data.schoolAccesses = schoolAccesses;
@@ -558,6 +568,77 @@ function sanitizeDocIdPart(value) {
 
 function slugifyClubName(name) {
   return sanitizeDocIdPart(name);
+}
+
+/**
+ * After school-rep and club-core are approved separately, keep both grants sticky.
+ * - Canonical hostRequests/schoolRepresentative_{uid} stays approved
+ * - users.schoolRepApproved stays true (rules use this even if role is clubCore)
+ * Safe to run on every login; no super-admin Repair needed for the normal path.
+ */
+async function syncDualRoleGrants({ uid, profile, ownHostRequests, hasClubAccess, hasSchoolAccess }) {
+  if (!uid || !auth.currentUser) return;
+  const approvedSchoolRep = (ownHostRequests || []).find(
+    (r) => r.type === "schoolRepresentative" && r.status === "approved"
+  );
+  if (!approvedSchoolRep && !profile.schoolRepApproved && !hasSchoolAccess) return;
+
+  const canonicalId = `schoolRepresentative_${uid}`;
+  const canonicalRef = doc(db, "hostRequests", canonicalId);
+
+  // Prefer an already-approved request body (canonical or legacy id).
+  if (approvedSchoolRep) {
+    try {
+      if (approvedSchoolRep.id !== canonicalId) {
+        // Best-effort: copy legacy approved doc onto the canonical id (super-admin Approve also does this).
+        // Regular users may not have permission; ignore failures.
+        await setDoc(canonicalRef, {
+          type: "schoolRepresentative",
+          uid,
+          email: approvedSchoolRep.email || auth.currentUser.email || "",
+          name: approvedSchoolRep.name || profile.name || "",
+          schoolId: approvedSchoolRep.schoolId || profile.schoolScope || profile.school || "",
+          roleTitle: approvedSchoolRep.roleTitle || "Student Representative",
+          description: approvedSchoolRep.description || "",
+          status: "approved",
+          updatedAt: serverTimestamp(),
+        }, { merge: true });
+      }
+    } catch (_) {
+      /* ignore — repair button / re-Approve covers legacy ids */
+    }
+  }
+
+  // Sticky flag: survives role overwrites to clubCore. Rules allow this when canonical request is approved.
+  if (profile.schoolRepApproved !== true && (approvedSchoolRep || hasSchoolAccess)) {
+    try {
+      const canonSnap = await getDoc(canonicalRef);
+      if (canonSnap.exists() && canonSnap.data()?.status === "approved") {
+        const patch = {
+          schoolRepApproved: true,
+          updatedAt: serverTimestamp(),
+        };
+        const scope = approvedSchoolRep?.schoolId || profile.schoolScope || profile.school || "";
+        if (scope && profile.schoolScope !== scope) patch.schoolScope = scope;
+        await updateDoc(doc(db, "users", uid), patch);
+        profile.schoolRepApproved = true;
+        if (patch.schoolScope) profile.schoolScope = patch.schoolScope;
+      }
+    } catch (_) {
+      /* ignore — Super Admin "Migrate old school-rep grants" covers legacy doc ids once */
+    }
+  }
+
+  // Ensure club-core approval bit stays set when coreMembers access exists (display/sync only).
+  if (hasClubAccess && profile.clubCoreApproved !== true) {
+    try {
+      // Super-admin or prior approve writes this; users cannot set clubCoreApproved themselves.
+      // No-op for students — club posting uses coreMembers, not this flag.
+      void hasClubAccess;
+    } catch (_) {
+      /* ignore */
+    }
+  }
 }
 
 function isEventExpired(event) {
@@ -710,6 +791,7 @@ async function applyNewClubApproval(requestData) {
   if (requestData.uid) {
     await tracedSetDoc(doc(db, "users", requestData.uid), {
       role: "clubCore",
+      clubCoreApproved: true,
       updatedAt: serverTimestamp(),
     }, { merge: true });
   }
@@ -753,19 +835,34 @@ async function updateHostRequestStatus(requestId, status) {
     }, { merge: true });
 
     if (requestData.uid) {
+      // merge: true keeps schoolRepApproved if they were already approved as school-rep
       await tracedSetDoc(doc(db, "users", requestData.uid), {
         role: "clubCore",
+        clubCoreApproved: true,
         updatedAt: serverTimestamp(),
       }, { merge: true });
     }
   }
 
-  // 2. School representative — super-admin Approve (or manual status=approved in Firestore).
-  // Hosting authority comes from the approved hostRequests doc; users.role is also written when Approve is used.
+  // 2. School representative — sticky grant so later club-core role writes cannot remove posting rights.
   if (requestData.type === "schoolRepresentative" && requestData.uid) {
+    const canonicalId = `schoolRepresentative_${requestData.uid}`;
+    if (requestId !== canonicalId) {
+      await tracedSetDoc(doc(db, "hostRequests", canonicalId), {
+        ...requestData,
+        type: "schoolRepresentative",
+        uid: requestData.uid,
+        status: "approved",
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+    }
+    const userSnap = await getDoc(doc(db, "users", requestData.uid));
+    const existing = userSnap.exists() ? (userSnap.data() || {}) : {};
+    const keepClubCore = existing.role === "clubCore" || existing.clubCoreApproved === true;
     await tracedSetDoc(doc(db, "users", requestData.uid), {
-      role: "schoolRepresentative",
-      schoolScope: requestData.schoolId || "",
+      schoolRepApproved: true,
+      schoolScope: requestData.schoolId || existing.schoolScope || "",
+      role: keepClubCore ? "clubCore" : "schoolRepresentative",
       updatedAt: serverTimestamp(),
     }, { merge: true });
   }
@@ -778,6 +875,9 @@ async function updateHostRequestStatus(requestId, status) {
 }
 
 async function createEvent(payload) {
+  if (payload?.hostType === "school") {
+    await assertCanCreateSchoolContent();
+  }
   const ref = await tracedAddDoc(collection(db, "events"), {
     ...payload,
     status: payload.status || "published",
@@ -789,6 +889,9 @@ async function createEvent(payload) {
 }
 
 async function createAnnouncement(payload) {
+  if (payload?.sourceType === "school") {
+    await assertCanCreateSchoolContent();
+  }
   const ref = await tracedAddDoc(collection(db, "announcements"), {
     ...payload,
     status: payload.status || "published",
@@ -1186,6 +1289,82 @@ async function loadAllPendingClubApplications() {
   return rows(snap);
 }
 
+async function repairSchoolRepGrants() {
+  if (!(await hasSuperAdminGrant(auth.currentUser))) {
+    throw new Error("Only super admins can repair school-rep grants.");
+  }
+  const snap = await getDocs(query(
+    collection(db, "hostRequests"),
+    where("type", "==", "schoolRepresentative"),
+    where("status", "==", "approved"),
+    limit(200)
+  ));
+  let fixed = 0;
+  for (const row of snap.docs) {
+    const data = row.data() || {};
+    if (!data.uid) continue;
+    const canonicalId = `schoolRepresentative_${data.uid}`;
+    await tracedSetDoc(doc(db, "hostRequests", canonicalId), {
+      ...data,
+      type: "schoolRepresentative",
+      uid: data.uid,
+      status: "approved",
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+    const userSnap = await getDoc(doc(db, "users", data.uid));
+    const existing = userSnap.exists() ? (userSnap.data() || {}) : {};
+    const keepClubCore = existing.role === "clubCore" || existing.clubCoreApproved === true;
+    await tracedSetDoc(doc(db, "users", data.uid), {
+      schoolRepApproved: true,
+      schoolScope: data.schoolId || existing.schoolScope || "",
+      role: keepClubCore ? "clubCore" : "schoolRepresentative",
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+    fixed += 1;
+  }
+  return fixed;
+}
+
+async function assertCanCreateSchoolContent() {
+  const user = auth.currentUser;
+  if (!user) throw new Error("Sign in first.");
+  const canonicalId = `schoolRepresentative_${user.uid}`;
+  const userRef = doc(db, "users", user.uid);
+
+  const check = async () => {
+    const [reqSnap, userSnap] = await Promise.all([
+      getDoc(doc(db, "hostRequests", canonicalId)),
+      getDoc(userRef),
+    ]);
+    const reqOk = reqSnap.exists() && reqSnap.data()?.status === "approved";
+    const profile = userSnap.exists() ? (userSnap.data() || {}) : {};
+    const flagOk = profile.schoolRepApproved === true;
+    const roleOk = profile.role === "schoolRepresentative";
+    return { reqOk, flagOk, roleOk, profile, reqSnap };
+  };
+
+  let state = await check();
+  if (state.reqOk || state.flagOk || state.roleOk) return true;
+
+  // Self-heal: canonical approved request exists but sticky flag was never written (e.g. status toggled in console).
+  if (state.reqSnap.exists() && state.reqSnap.data()?.status === "approved" && state.profile.schoolRepApproved !== true) {
+    try {
+      await updateDoc(userRef, {
+        schoolRepApproved: true,
+        updatedAt: serverTimestamp(),
+      });
+      state = await check();
+      if (state.reqOk || state.flagOk || state.roleOk) return true;
+    } catch (_) {
+      /* fall through */
+    }
+  }
+
+  throw new Error(
+    "School-rep posting is not granted yet. A Super Admin must Approve your school-rep request once. For older accounts only, use Admin → Requests → Migrate old school-rep grants once."
+  );
+}
+
 async function loadMore(collectionName) {
   let q;
   if (collectionName === "events" && lastDocs.events) {
@@ -1279,6 +1458,8 @@ window.RVUFirebase = {
   loadClubPendingApplications,
   loadAllPendingClubApplications,
   listClubCoreMembers,
+  repairSchoolRepGrants,
+  assertCanCreateSchoolContent,
   approveClubApplication,
   rejectClubApplication,
   isEventExpired,

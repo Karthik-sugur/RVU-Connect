@@ -57,6 +57,10 @@ service cloud.firestore {
           )
           || (
             exists(/databases/$(database)/documents/users/$(request.auth.uid))
+            && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.schoolRepApproved == true
+          )
+          || (
+            exists(/databases/$(database)/documents/users/$(request.auth.uid))
             && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'schoolRepresentative'
           )
         );
@@ -82,10 +86,29 @@ service cloud.firestore {
 
       allow read: if isSuperAdmin() || (isRvuEmail() && createsOwnDoc(uid));
 
-      allow update: if isSuperAdmin() || (isRvuEmail()
-        && createsOwnDoc(uid)
-        && unchanged('role')
-        && unchanged('email'));
+      allow update: if isSuperAdmin()
+        || (
+          isRvuEmail()
+          && createsOwnDoc(uid)
+          && unchanged('role')
+          && unchanged('email')
+          && unchanged('schoolRepApproved')
+          && unchanged('clubCoreApproved')
+        )
+        // Self-heal sticky school-rep flag when the canonical approved host request already exists.
+        // Lets dual-role users recover without running Repair every time.
+        || (
+          isRvuEmail()
+          && createsOwnDoc(uid)
+          && unchanged('role')
+          && unchanged('email')
+          && unchanged('clubCoreApproved')
+          && request.resource.data.schoolRepApproved == true
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['schoolRepApproved', 'schoolScope', 'updatedAt'])
+          && exists(/databases/$(database)/documents/hostRequests/$('schoolRepresentative_' + request.auth.uid))
+          && get(/databases/$(database)/documents/hostRequests/$('schoolRepresentative_' + request.auth.uid)).data.status == 'approved'
+        );
 
       allow delete: if isSuperAdmin();
 

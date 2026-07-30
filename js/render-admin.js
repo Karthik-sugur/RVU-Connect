@@ -249,7 +249,8 @@ export function renderSuperAdmin() {
         <span class="section-num">Pending</span>
         <h2>Host &amp; club requests</h2>
         <p style="font-size:13px;color:#8a7a6a;margin:0 0 16px;">School-rep and new-club requests must be approved here (or set <code>status</code> to <code>approved</code> in Firestore for school-rep only). New clubs still need the Approve button so the club document is created. Club membership apps for clubs with no core team also appear below.</p>
-        <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+          <button style="background:none;border:1.5px solid #c8b89a;padding:4px 10px;font-size:11px;font-weight:700;color:#5a4a3a;cursor:pointer;text-transform:uppercase;" data-action="repair-school-rep-grants" title="One-time migrate old school-rep accounts. Not needed for new approvals.">Migrate old school-rep grants</button>
           <button style="background:none;border:1.5px solid #c8b89a;padding:4px 10px;font-size:11px;font-weight:700;color:#5a4a3a;cursor:pointer;text-transform:uppercase;" data-action="load-all-club-applicants">Refresh club apps</button>
         </div>
         ${pending.length ? pending.map((item) => {
