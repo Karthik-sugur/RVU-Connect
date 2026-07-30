@@ -736,12 +736,15 @@ export async function handleAction(action, dataset) {
       schoolName: document.getElementById("ce-host-school")?.value || state.host.school || state.user.school || "",
       registrationDeadline: registrationDeadline || null,
     };
-    const newEvent = await window.RVUFirebase.createEvent(payload);
-    events.unshift(newEvent);
-    if(state.allEvents) state.allEvents.unshift(newEvent);
-    state.createEventOpen = false;
-    /* removed syncFirebaseData */
-    renderAtTop();
+    try {
+      const newEvent = await window.RVUFirebase.createEvent(payload);
+      events.unshift(newEvent);
+      if (state.allEvents) state.allEvents.unshift(newEvent);
+      state.createEventOpen = false;
+      renderAtTop();
+    } catch (e) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: e.message || "Could not create event.", type: "error" } }));
+    }
     return;
   }
   if (action === "close-create-announcement") {
@@ -813,12 +816,15 @@ export async function handleAction(action, dataset) {
       payload.type = "School";
     }
 
-    const newAnn = await window.RVUFirebase.createAnnouncement(payload);
-    announcements.unshift(newAnn);
-    if(state.allAnnouncements) state.allAnnouncements.unshift(newAnn);
-    state.createAnnouncementOpen = false;
-    /* removed syncFirebaseData */
-    renderAtTop();
+    try {
+      const newAnn = await window.RVUFirebase.createAnnouncement(payload);
+      announcements.unshift(newAnn);
+      if (state.allAnnouncements) state.allAnnouncements.unshift(newAnn);
+      state.createAnnouncementOpen = false;
+      renderAtTop();
+    } catch (e) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: e.message || "Could not create announcement.", type: "error" } }));
+    }
     return;
   }
   if (action === "admin-unpublish-event") {
@@ -1230,6 +1236,16 @@ export async function handleAction(action, dataset) {
     } finally {
       state._clubApplicantsLoading = false;
       renderAtTop();
+    }
+    return;
+  }
+  if (action === "repair-school-rep-grants") {
+    if (!window.RVUFirebase || !isSuperAdmin()) return;
+    try {
+      const fixed = await window.RVUFirebase.repairSchoolRepGrants();
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: `Migrated ${fixed} school-rep grant${fixed === 1 ? "" : "s"}. Dual club-core + school-rep users can post both after a refresh. You do not need to run this again.`, type: "success" } }));
+    } catch (e) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: e.message || "Migration failed.", type: "error" } }));
     }
     return;
   }
