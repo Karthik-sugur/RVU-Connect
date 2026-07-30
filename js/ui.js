@@ -799,6 +799,8 @@ export function renderClubDetail() {
   const joinHref = club.join || club.joinLink || "";
   const canEdit = canManageClub(club);
   const following = isFollowingClub(club.id || club.slug);
+  const coreMembers = state.clubCoreMembers || [];
+  const myEmail = (state.authUser?.email || "").trim().toLowerCase();
   return `
     <section class="club-detail-hero">
       <button class="back-link" data-action="back-to-clubs">Back to all clubs</button>
@@ -850,6 +852,29 @@ export function renderClubDetail() {
       </article>
     </section>
     <section class="section">
+      <div class="section-title">
+        <h2>Club core team</h2>
+        <span>${state._clubCoreMembersLoading ? "Loading…" : `${coreMembers.length} member${coreMembers.length === 1 ? "" : "s"}`}</span>
+      </div>
+      ${state._clubCoreMembersLoading
+        ? `<p style="font-size:13px;color:#8a7a6a;">Loading core members…</p>`
+        : coreMembers.length
+          ? `<div class="admin-board">${coreMembers.map((m) => {
+            const email = (m.email || m.id || "").trim().toLowerCase();
+            const isSelf = email && email === myEmail;
+            const canRemove = canEdit && email && !isSelf && !m.permanent;
+            return `
+              <div class="admin-row">
+                <div>
+                  <strong>${escapeHtml(m.name || email || "Core member")}</strong>
+                  <span>${escapeHtml(email)}${m.role ? ` · ${escapeHtml(m.role)}` : ""}${m.permanent ? " · Founder" : ""}</span>
+                </div>
+                ${canRemove ? `<div class="admin-row-actions"><button data-action="remove-club-core-member" data-club="${club.id || club.slug}" data-email="${escapeHtml(email)}" data-name="${escapeHtml(m.name || email)}">Remove</button></div>` : (isSelf ? `<span class="tag">You</span>` : "")}
+              </div>`;
+          }).join("")}</div>`
+          : renderEmptyState("No core members listed", "Approved club core members will appear here.")}
+    </section>
+    <section class="section">
       <div class="section-title"><h2>Club events</h2><span>${clubEvents.length ? "Hosted by club" : "No events yet"}</span></div>
       ${clubEvents.length ? `<div class="grid event-grid">${clubEvents.map(renderEventCard).join("")}</div>` : renderEmptyState("No events listed yet", "When this club posts published events, they will appear here.")}
     </section>
@@ -858,6 +883,7 @@ export function renderClubDetail() {
 }
 
 export function renderEditClubModal(club = {}) {
+  const highlightsText = Array.isArray(club.highlights) ? club.highlights.join("\n") : (club.highlights || "");
   return `
     <div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px 0 80px;">
       <div style="background:#f5f2ec;width:100%;max-width:600px;margin:0 16px;">
@@ -878,9 +904,15 @@ export function renderEditClubModal(club = {}) {
             <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Currently active on</label>
             <input id="ec-doing" type="text" value="${escapeHtml(club.doing || "")}" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
           </div>
+          <div style="margin-bottom:16px;">
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">What they have done (highlights)</label>
+            <textarea id="ec-highlights" placeholder="One highlight per line" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;resize:vertical;min-height:100px;">${escapeHtml(highlightsText)}</textarea>
+            <p style="font-size:10px;color:#8a7a6a;margin:6px 0 0;font-family:inherit;">Shown under “What they have done”. One item per line.</p>
+          </div>
           <div style="margin-bottom:20px;">
             <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Join / registration link</label>
-            <input id="ec-join" type="url" value="${escapeHtml(club.join || club.joinLink || "")}" placeholder="https://..." style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
+            <input id="ec-join" type="url" value="${escapeHtml(club.join || club.joinLink || "")}" placeholder="https://forms.google.com/..." style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
+            <p style="font-size:10px;color:#8a7a6a;margin:6px 0 0;font-family:inherit;">Google Form, Luma, or any signup URL. Required for the Join button when registration is open.</p>
           </div>
           <div style="display:flex;gap:10px;">
             <button style="flex:1;background:#D7AC54;color:#1a1a1a;border:none;padding:12px;font-size:12px;font-weight:800;font-family:inherit;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;" data-action="submit-edit-club" data-docid="${club.id || club.slug}">Save changes</button>
@@ -1802,8 +1834,13 @@ export function renderOnboarding() {
     return `
       <div class="modal-layer">
         <section class="modal">
-          <p class="eyebrow">New Club Creation</p>
-          <h2>Create a new club</h2>
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:8px;">
+            <div>
+              <p class="eyebrow">New Club Creation</p>
+              <h2 style="margin:0;">Create a new club</h2>
+            </div>
+            <button class="btn secondary" data-action="cancel-create-club" style="flex-shrink:0;">Cancel</button>
+          </div>
           <div class="form-grid two">
             ${clubInputField("name", "Club Name", state.clubDraft.name, "e.g. Code Club")}
             ${clubInputField("category", "Category", state.clubDraft.category, "e.g. Technical")}
@@ -1824,7 +1861,7 @@ export function renderOnboarding() {
           </div>
           <div style="display:flex;gap:12px;margin-top:16px;">
             <button class="btn gold" style="flex:1;" data-action="submit-new-club">Submit for Approval</button>
-            <button class="btn secondary" data-action="back-to-host-info">Back</button>
+            <button class="btn secondary" data-action="cancel-create-club">Cancel</button>
           </div>
         </section>
       </div>

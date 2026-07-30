@@ -279,8 +279,21 @@ export async function handleAction(action, dataset) {
     return;
   }
   if (action === "create-new-club-onboarding") {
+    state._createClubReturnRoute = state.onboardingStep === "host-info" ? "__host-info__" : (state.route || "profile");
     state.onboardingStep = "create-club";
     renderAtTop();
+  }
+  if (action === "cancel-create-club") {
+    const back = state._createClubReturnRoute || "profile";
+    state._createClubReturnRoute = null;
+    if (back === "__host-info__") {
+      state.onboardingStep = "host-info";
+      renderAtTop();
+      return;
+    }
+    state.onboardingStep = null;
+    navigate(back);
+    return;
   }
   if (action === "back-to-host-info") {
     state.onboardingStep = "host-info";
@@ -340,6 +353,10 @@ export async function handleAction(action, dataset) {
       window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "You need an approved club core or school representative role to create events.", type: "info" } }));
       return;
     }
+    if (isSchoolRep() && !isClubCore()) state._createHostMode = "school";
+    else if (isClubCore() && !isSchoolRep()) state._createHostMode = "club";
+    else if (dataset.mode === "school" || dataset.mode === "club") state._createHostMode = dataset.mode;
+    else if (isSchoolRep() && isClubCore() && !state._createHostMode) state._createHostMode = "club";
     state.createEventOpen = true;
     state.createOpen = false;
     render();
@@ -350,6 +367,10 @@ export async function handleAction(action, dataset) {
       window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "You need an approved club core or school representative role to create announcements.", type: "info" } }));
       return;
     }
+    if (isSchoolRep() && !isClubCore()) state._createHostMode = "school";
+    else if (isClubCore() && !isSchoolRep()) state._createHostMode = "club";
+    else if (dataset.mode === "school" || dataset.mode === "club") state._createHostMode = dataset.mode;
+    else if (isSchoolRep() && isClubCore() && !state._createHostMode) state._createHostMode = "club";
     state.createAnnouncementOpen = true;
     state.createOpen = false;
     render();
@@ -357,9 +378,24 @@ export async function handleAction(action, dataset) {
   }
   if (action === "open-club") {
     navigate("clubs", { clubSlug: dataset.club });
+    if (window.RVUFirebase && dataset.club) {
+      state._clubCoreMembersLoading = true;
+      state.clubCoreMembers = [];
+      window.RVUFirebase.listClubCoreMembers(dataset.club).then((members) => {
+        state.clubCoreMembers = members || [];
+        state._clubCoreMembersLoading = false;
+        renderAtTop();
+      }).catch(() => {
+        state.clubCoreMembers = [];
+        state._clubCoreMembersLoading = false;
+        renderAtTop();
+      });
+    }
   }
   if (action === "back-to-clubs") {
     state.selectedClubSlug = null;
+    state.clubCoreMembers = [];
+    state._loadedClubCoreFor = null;
   }
   if (action === "toggle-registration") {
     const club = clubs.find((item) => item.slug === dataset.club);
@@ -515,13 +551,31 @@ export async function handleAction(action, dataset) {
     await window.RVUFirebase.removeClubCoreRole(dataset.docid, email);
     /* removed syncFirebaseData */
   }
-  if (action === "club-remove-core") {
-    if (!window.RVUFirebase || !isSuperAdmin() || !dataset.docid) return;
-    const email = await promptUser("Core member email to remove");
+  if (action === "club-remove-core" || action === "remove-club-core-member") {
+    if (!window.RVUFirebase || !dataset.docid && !dataset.club) return;
+    const clubId = dataset.club || dataset.docid;
+    const club = clubs.find((item) => item.id === clubId || item.slug === clubId);
+    if (!isSuperAdmin() && !canManageClub(club)) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Only club core of this club can remove members.", type: "error" } }));
+      return;
+    }
+    const email = dataset.email || await promptUser("Core member email to remove");
     if (!email) return;
-    if (!window.confirm(`Remove ${email} from this club core?`)) return;
-    await window.RVUFirebase.removeClubCoreRole(dataset.docid, email);
-    /* removed syncFirebaseData */
+    const myEmail = (state.authUser?.email || "").trim().toLowerCase();
+    if (email.trim().toLowerCase() === myEmail) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Use Leave club core to remove yourself.", type: "info" } }));
+      return;
+    }
+    if (!window.confirm(`Remove ${dataset.name || email} from this club core?`)) return;
+    try {
+      await window.RVUFirebase.removeClubCoreRole(clubId, email);
+      state.clubCoreMembers = (state.clubCoreMembers || []).filter((m) => (m.email || m.id || "").toLowerCase() !== email.trim().toLowerCase());
+      renderAtTop();
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Core member removed.", type: "info" } }));
+    } catch (e) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: e.message || "Could not remove member.", type: "error" } }));
+    }
+    return;
   }
   if (action === "admin-delete-club") {
     if (!window.RVUFirebase || !isSuperAdmin() || !dataset.docid) return;
@@ -732,7 +786,9 @@ export async function handleAction(action, dataset) {
       payload.imageUrl = imageUrl;
     }
 
-    if (isClubCore() && !(isSchoolRep() && (state._createHostMode || "club") === "school")) {
+    const both = isClubCore() && isSchoolRep();
+    const hostMode = both ? (state._createHostMode || "club") : (isClubCore() ? "club" : "school");
+    if (hostMode === "club") {
       let club = activeClub();
       const hostClubId = document.getElementById("ca-host-club")?.value;
       if (hostClubId && state.host.clubAccesses) {
@@ -743,7 +799,7 @@ export async function handleAction(action, dataset) {
       payload.sourceType = "club";
       payload.type = "Club";
       payload.clubId = club.id || club.slug;
-    } else if (isSchoolRep()) {
+    } else if (hostMode === "school" || isSchoolRep()) {
       const selectedSchool = document.getElementById("ca-host-school")?.value || state.host.school || state.user.school;
       payload.source = selectedSchool;
       payload.sourceType = "school";
@@ -1449,6 +1505,8 @@ export async function handleAction(action, dataset) {
     const description = document.getElementById("ec-description")?.value?.trim() || "";
     const doing = document.getElementById("ec-doing")?.value?.trim() || "";
     const joinLink = document.getElementById("ec-join")?.value?.trim() || "";
+    const highlightsRaw = document.getElementById("ec-highlights")?.value || "";
+    const highlights = highlightsRaw.split("\n").map((s) => s.trim()).filter(Boolean);
     if (joinLink && !/^https?:\/\//.test(joinLink)) {
       window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Join link must start with http:// or https://", type: "info" } }));
       return;
@@ -1460,8 +1518,9 @@ export async function handleAction(action, dataset) {
         doing,
         join: joinLink,
         joinLink,
+        highlights,
       });
-      Object.assign(club, { tagline, description, doing, join: joinLink, joinLink });
+      Object.assign(club, { tagline, description, doing, join: joinLink, joinLink, highlights });
       state.editClubOpen = false;
       state.editClubId = null;
       renderAtTop();

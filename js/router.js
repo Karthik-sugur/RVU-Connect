@@ -56,6 +56,21 @@ export function navigate(route, params = {}) {
 }
 
 export async function renderCurrentRoute() {
+  if (state.route === "clubs" && state.selectedClubSlug && window.RVUFirebase) {
+    const clubId = state.selectedClubSlug;
+    if (state._loadedClubCoreFor !== clubId) {
+      state._loadedClubCoreFor = clubId;
+      state._clubCoreMembersLoading = true;
+      try {
+        state.clubCoreMembers = await window.RVUFirebase.listClubCoreMembers(clubId) || [];
+      } catch (_) {
+        state.clubCoreMembers = [];
+      } finally {
+        state._clubCoreMembersLoading = false;
+      }
+    }
+  }
+
   if (state.route === "admin" && window.RVUFirebase) {
     const tab = state.adminTab || "requests";
     // Check if we need to load this tab data

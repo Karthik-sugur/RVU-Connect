@@ -122,6 +122,9 @@ export const state = {
   _clubApplyModalOpen: false,
   editClubOpen: false,
   editClubId: null,
+  clubCoreMembers: [],
+  _clubCoreMembersLoading: false,
+  editClubId: null,
 };
 
 export const app = document.querySelector("#app");
