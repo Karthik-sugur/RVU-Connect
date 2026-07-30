@@ -1,5 +1,6 @@
 import { state } from './state.js';
 import { renderAtTop } from './ui.js';
+import { isClubCore, isSuperAdmin } from './auth.js';
 
 export function parseRoute() {
   const params = new URLSearchParams(window.location.search);
@@ -69,13 +70,46 @@ export async function renderCurrentRoute() {
     if (needsLoad) {
       state.dataLoading = true;
       renderAtTop();
-      if (tab === "requests") state.hostRequests = (await window.RVUFirebase.loadAdminTab(tab)).docs || [];
+      if (tab === "requests") {
+        state.hostRequests = (await window.RVUFirebase.loadAdminTab(tab)).docs || [];
+        if (isSuperAdmin()) {
+          try {
+            state.clubApplicants = await window.RVUFirebase.loadAllPendingClubApplications();
+            state._clubApplicantsLoaded = true;
+          } catch (_) { /* optional */ }
+        }
+      }
       else if (tab === "flags") state.moderationFlags = (await window.RVUFirebase.loadAdminTab(tab)).docs || [];
       else if (tab === "users") state.allUsers = (await window.RVUFirebase.loadAdminTab(tab)).docs || [];
       else if (tab === "events") state.allEvents = (await window.RVUFirebase.loadAdminTab(tab)).docs || [];
       else if (tab === "announcements") state.allAnnouncements = (await window.RVUFirebase.loadAdminTab(tab)).docs || [];
       else if (tab === "contentReviews") state.contentReviews = (await window.RVUFirebase.loadAdminTab(tab)).docs || [];
       state.dataLoading = false;
+    }
+
+    // Club core dashboard: auto-load membership applicants for all managed clubs.
+    if (isClubCore() && state.host.approved && !isSuperAdmin() && !state._clubApplicantsLoaded && !state._clubApplicantsLoading) {
+      const clubIds = (state.host.clubAccesses || [])
+        .map((access) => access.club?.id || access.club?.slug)
+        .filter(Boolean);
+      if (clubIds.length) {
+        state._clubApplicantsLoading = true;
+        renderAtTop();
+        try {
+          const nested = await Promise.all(clubIds.map((clubId) => window.RVUFirebase.loadClubPendingApplications(clubId)));
+          const seen = new Set();
+          state.clubApplicants = nested.flat().filter((app) => {
+            if (!app?.id || seen.has(app.id)) return false;
+            seen.add(app.id);
+            return true;
+          });
+          state._clubApplicantsLoaded = true;
+        } catch (error) {
+          console.warn("[RVU] Failed to auto-load club applicants", error);
+        } finally {
+          state._clubApplicantsLoading = false;
+        }
+      }
     }
   }
   renderAtTop();

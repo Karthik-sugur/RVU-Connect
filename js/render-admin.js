@@ -7,14 +7,27 @@ export function renderAdminConsole() {
   if (!isClubCore() && !isSchoolRep() && !isSuperAdmin()) return renderRestrictedAdmin();
   if ((isClubCore() || isSchoolRep()) && !state.host.approved) return renderPendingAdminAccess();
   if (isSuperAdmin()) return renderSuperAdminDashboard();
-  const dashboard = isClubCore() ? renderClubAdmin() : renderSchoolAdmin();
+
+  const both = isClubCore() && isSchoolRep();
+  const title = both
+    ? "Host Dashboard"
+    : isClubCore()
+      ? "Club Core Dashboard"
+      : "School Representative Dashboard";
+  const copy = both
+    ? "You have both club-core and school-rep access. Review club membership applications below, and post school events/notices from Create (pick a school in the form)."
+    : isClubCore()
+      ? "Review and accept students applying for club core on the clubs you manage. Create events and announcements from the Create button in the top bar; edit your club profile from the Clubs page."
+      : "Post school events and notices from the Create button in the top bar. Pick the school for each post from the dropdown. School-rep applications are approved by Super Admin only.";
+
   return `
     <section class="page-head admin-head">
       ${sectionLabel("06", "Control rooms")}
-      <h1>${isClubCore() ? "Club Core Dashboard" : "School Representative Dashboard"}</h1>
-      <p>Your controls are scoped to the organization your approved representative record grants. This dashboard cannot change your role.</p>
+      <h1>${title}</h1>
+      <p>${copy}</p>
     </section>
-    ${dashboard}
+    ${isClubCore() ? renderClubAdmin() : ""}
+    ${isSchoolRep() ? renderSchoolAdmin() : ""}
   `;
 }
 
@@ -84,8 +97,8 @@ export function renderRestrictedAdmin() {
   return `
     <section class="page-head admin-head">
       ${sectionLabel("06", "Restricted")}
-      <h1>Admin access</h1>
-      <p>Admin screens are only available when your Firestore profile or approved representative record grants access. Students cannot switch themselves into admin roles from the client.</p>
+      <h1>Admin access required</h1>
+      <p>This area is for approved club core members, school representatives, and super admins.</p>
     </section>
   `;
 }
@@ -93,95 +106,60 @@ export function renderRestrictedAdmin() {
 export function renderPendingAdminAccess() {
   return `
     <section class="page-head admin-head">
-      ${sectionLabel("06", "Pending verification")}
-      <h1>${isClubCore() ? "Club core request" : "School representative request"}</h1>
-      <p>${isClubCore() ? `${activeClub().name} core access must be approved by the current president or a super admin before event hosting is enabled.` : `${state.host.school} representative access must be approved by a super admin before school controls are enabled.`}</p>
+      ${sectionLabel("06", "Pending approval")}
+      <h1>Waiting for approval</h1>
+      <p>Your host request is still pending. You can explore campus content, but posting stays locked until a super admin (or club core for membership apps) approves you.</p>
     </section>
     <section class="admin-workspace">
       <div class="admin-summary">
-        <span><strong>Pending</strong> access state</span>
-        <span><strong>${isClubCore() ? activeClub().name : "School"}</strong> scope</span>
-        <span><strong>${state.host.approver}</strong> approver route</span>
-      </div>
-      <div class="admin-board">
-        <article class="admin-card wide">
-          <span class="section-num">Request</span>
-          <h2>${state.host.roleTitle}</h2>
-          <p>${state.host.description}</p>
-          <div class="admin-checklist">
-            <span>Cannot create events until approved</span>
-            <span>Cannot post announcements until approved</span>
-            <span>Can be approved by super admin</span>
-          </div>
-        </article>
+        <span><strong>${escapeHtml(state.host.type || "Host")}</strong> request</span>
+        <span><strong>${escapeHtml(state.host.approver || "Super Admin")}</strong> approver route</span>
       </div>
     </section>
   `;
 }
 
 export function renderSchoolAdmin() {
-  const schoolName = isSuperAdmin() ? "All schools" : state.host.school;
-  const schoolEvents = events.filter((event) => event.type === "School Event" || event.type === "Faculty Event");
+  const schoolEvents = events.filter((e) => e.hostType === "school").slice(0, 5);
+  const schoolNotices = announcements.filter((a) => a.sourceType === "school" || a.type === "School").slice(0, 5);
   return `
     <section class="admin-workspace">
       <div class="admin-summary">
-        <span><strong>${isSuperAdmin() ? schools.length : "1"}</strong> ${isSuperAdmin() ? "schools" : "school scope"}</span>
-        <span><strong>${schoolEvents.length}</strong> school/faculty events</span>
-        <span><strong>${state.host.approved || isSuperAdmin() ? "Enabled" : "Locked"}</strong> school posting</span>
+        <span><strong>School rep</strong> — pick school per post</span>
+        <span><strong>${schoolEvents.length}</strong> recent school events</span>
+        <span><strong>${schoolNotices.length}</strong> recent school notices</span>
       </div>
       <div class="admin-board">
         <article class="admin-card wide">
-          <span class="section-num">Scope</span>
-          <h2>${schoolName}</h2>
-          <p>School representatives can post school events, faculty announcements, registration links, and notices only for the school they are verified under.</p>
-          <div class="project-actions">
+          <span class="section-num">Post</span>
+          <h2>School representative tools</h2>
+          <p style="font-size:13px;color:#8a7a6a;margin:0 0 16px;">You can post events and announcements for any school using the school dropdown in Create. New school-rep applications are approved only by Super Admin (or by setting the request status to approved in Firestore).</p>
+          <div class="project-actions" style="margin-bottom:18px;display:flex;gap:10px;flex-wrap:wrap;">
             <button class="btn gold" data-action="create-event">Create school event</button>
             <button class="btn secondary" data-action="create-announcement">Create school notice</button>
           </div>
-        </article>
-        <article class="admin-card">
-          <span class="section-num">Links</span>
-          <h2>Official links</h2>
-          <div class="admin-checklist">
-            <span>Primary link: ${state.host.joinLink || "No link configured"}</span>
-            <span>Visible on school notices and school events</span>
-            <span>Editable only by approved school representatives</span>
-          </div>
-        </article>
-        <article class="admin-card">
-          <span class="section-num">Notice</span>
-          <h2>School announcements</h2>
-          ${announcements.filter((item) => item.sourceType === "school" || item.type === "Faculty").slice(0, 3).map((item) => `
-            <div class="admin-row">
-              <div><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.source || "School")} · ${escapeHtml(item.tag || "Update")}</span></div>
-              <div class="admin-row-actions">
-                <button data-action="delete-school-announcement" data-docid="${item.id}">Delete</button>
-              </div>
-            </div>
-          `).join("") || renderEmptyState("No school announcements", "Published school announcements will appear here.")}
-        </article>
-        <article class="admin-card">
-          <span class="section-num">Events</span>
-          <h2>Event controls</h2>
-          ${schoolEvents.slice(0, 3).map((event) => `
-            <div class="admin-row">
-              <div><strong>${escapeHtml(event.title)}</strong><span>${event.host || "School"} · ${event.date || ""} · ${escapeHtml(event.location || "")}</span></div>
-              <div class="admin-row-actions">
-                <button data-action="delete-school-event" data-docid="${event.id}">Delete</button>
-              </div>
-            </div>
-          `).join("") || renderEmptyState("No school events", "Create a school event to see it here.")}
-        </article>
-        <article class="admin-card">
-          <span class="section-num">Rules</span>
-          <h2>Representative limits</h2>
-          <div class="admin-checklist">
-            <span>Post only for the verified school</span>
-            <span>Show or hide official registration and resource links</span>
-            <span>Primary link: ${state.host.joinLink || "No link configured"}</span>
-            <span>Cannot approve club core members</span>
-            <span>Escalate moderation issues to Super Admin</span>
-          </div>
+          <h3 style="font-size:14px;margin:16px 0 8px;">Your recent school events</h3>
+          ${schoolEvents.length
+            ? schoolEvents.map((e) => `
+              <div class="admin-row">
+                <div><strong>${escapeHtml(e.title)}</strong><span>${escapeHtml(e.schoolName || e.schoolId || e.host || "")} · ${escapeHtml(e.date || "")}</span></div>
+                <div class="admin-row-actions">
+                  <button data-action="open-edit-event" data-docid="${e.id}">Edit</button>
+                  <button data-action="delete-school-event" data-docid="${e.id}">Delete</button>
+                </div>
+              </div>`).join("")
+            : renderEmptyState("No school events yet", "Create one from the button above.")}
+          <h3 style="font-size:14px;margin:24px 0 8px;">Your recent school notices</h3>
+          ${schoolNotices.length
+            ? schoolNotices.map((a) => `
+              <div class="admin-row">
+                <div><strong>${escapeHtml(a.title)}</strong><span>${escapeHtml(a.schoolName || a.source || "")}</span></div>
+                <div class="admin-row-actions">
+                  <button data-action="edit-announcement" data-docid="${a.id}">Edit</button>
+                  <button data-action="delete-school-announcement" data-docid="${a.id}">Delete</button>
+                </div>
+              </div>`).join("")
+            : renderEmptyState("No school notices yet", "Create one from the button above.")}
         </article>
       </div>
     </section>
@@ -189,103 +167,49 @@ export function renderSchoolAdmin() {
 }
 
 export function renderClubAdmin() {
-  const club = isSuperAdmin() ? activeClub() : activeClub();
-  const clubEvents = events.filter((event) => event.club === club.name || event.host === club.name);
-  const clubAnnouncements = announcements.filter((item) => item.clubId === club.id || item.clubId === club.slug || item.source === club.name);
-  const canManageCore = isSuperAdmin();
+  const accesses = (state.host.clubAccesses && state.host.clubAccesses.length)
+    ? state.host.clubAccesses
+    : [{ club: activeClub() }];
+  const clubNames = accesses.map((access) => access.club?.name).filter(Boolean).join(", ");
+  const applicants = state.clubApplicants || [];
+
   return `
     <section class="admin-workspace">
       <div class="admin-summary">
-        <span><strong>${clubEvents.length}</strong> club events</span>
-        <span><strong>${club.registrationOpen ? "Open" : "Closed"}</strong> registration</span>
-        <span><strong>${state.host.roleTitle}</strong> your role</span>
+        <span><strong>${accesses.length}</strong> club${accesses.length === 1 ? "" : "s"} you manage</span>
+        <span><strong>${applicants.length}</strong> pending applicant${applicants.length === 1 ? "" : "s"}</span>
       </div>
       <div class="admin-board">
         <article class="admin-card wide">
-          <span class="section-num">Club</span>
-          <h2>${escapeHtml(club.name)}</h2>
-          <p>Only approved core members can host events, publish announcements, and control the links shown for ${escapeHtml(club.name)}.</p>
-          <div class="project-actions">
-            <button class="btn gold" data-action="create-event">Create club event</button>
-            <button class="btn secondary" data-action="create-announcement">Create update</button>
-            <button class="btn gold" data-action="toggle-registration" data-club="${club.slug}">${club.registrationOpen ? "Close registration" : "Open registration"}</button>
-            <button class="btn secondary" data-action="toast" data-message="Link visibility controls are ready for ${escapeHtml(club.name)}.">Manage links</button>
-          </div>
-        </article>
-        <article class="admin-card">
-          <span class="section-num">Links</span>
-          <h2>Visible links</h2>
-          <div class="admin-checklist">
-            <span>Join link: ${state.host.joinLink || club.join || "No link configured"}</span>
-            <span>Registration state: ${club.registrationOpen ? "Open" : "Closed"}</span>
-            <span>Shown only on this club's public profile</span>
-          </div>
-        </article>
-        <article class="admin-card">
-          <span class="section-num">Host</span>
-          <h2>Club posting</h2>
-          ${[
-            ...clubEvents.map(event => `
-              <div class="admin-row">
-                <div><strong>${escapeHtml(event.title)}</strong><span>Event · ${event.date || ""}</span></div>
-                <div class="admin-row-actions">
-                  <button data-action="delete-club-event" data-docid="${event.id}">Delete</button>
-                </div>
-              </div>
-            `),
-            ...clubAnnouncements.map(item => `
-              <div class="admin-row">
-                <div><strong>${escapeHtml(item.title)}</strong><span>Announcement · ${escapeHtml(item.tag || "Update")}</span></div>
-                <div class="admin-row-actions">
-                  <button data-action="delete-club-announcement" data-docid="${item.id}">Delete</button>
-                </div>
-              </div>
-            `),
-          ].slice(0, 4).join("") || renderEmptyState("No club posts", "Create an event or announcement to manage it here.")}
-        </article>
-        <article class="admin-card">
           <span class="section-num">Apply</span>
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-            <h2 style="margin:0;">Membership Applications</h2>
-            <button style="background:none;border:1.5px solid #c8b89a;padding:4px 10px;font-size:11px;font-weight:700;color:#5a4a3a;cursor:pointer;text-transform:uppercase;" data-action="load-club-applicants" data-club="${club.id}">Refresh</button>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:12px;flex-wrap:wrap;">
+            <div>
+              <h2 style="margin:0;">Membership Applications</h2>
+              <p style="margin:8px 0 0;font-size:13px;color:#8a7a6a;">Review students applying for club core on ${escapeHtml(clubNames || "your club")}. Club founders and every approved core member can accept or reject applicants.</p>
+            </div>
+            <button style="background:none;border:1.5px solid #c8b89a;padding:4px 10px;font-size:11px;font-weight:700;color:#5a4a3a;cursor:pointer;text-transform:uppercase;" data-action="load-club-applicants">Refresh</button>
           </div>
-          ${!state._clubApplicantsLoaded ? `
-            <div style="text-align:center;padding:20px;color:#8a7a6a;font-size:13px;">Click refresh to load pending applications.</div>
-          ` : state.clubApplicants.length === 0 ? `
-            ${renderEmptyState("No pending applications", "Student applications for club core will appear here.")}
-          ` : state.clubApplicants.map(app => `
+          ${state._clubApplicantsLoading ? `
+            <div style="text-align:center;padding:20px;color:#8a7a6a;font-size:13px;">Loading applications…</div>
+          ` : !state._clubApplicantsLoaded ? `
+            <div style="text-align:center;padding:20px;color:#8a7a6a;font-size:13px;">Loading applications…</div>
+          ` : applicants.length === 0 ? `
+            ${renderEmptyState("No pending applications", "When students apply to your club, they will appear here for you to approve or reject.")}
+          ` : applicants.map(app => {
+            const clubLabel = accesses.find((access) => (access.club?.id || access.club?.slug) === app.clubId)?.club?.name || app.clubId;
+            const appliedAt = app.createdAt?.toDate ? app.createdAt.toDate() : (app.createdAt ? new Date(app.createdAt) : null);
+            return `
             <div class="admin-row">
               <div>
                 <strong>${escapeHtml(app.name || app.email)}</strong>
-                <span>${escapeHtml(app.email)} · Applied: ${new Date(app.createdAt?.toDate ? app.createdAt.toDate() : app.createdAt).toLocaleDateString()}</span>
+                <span>${escapeHtml(app.email)} · ${escapeHtml(clubLabel || "Club")}${appliedAt && !Number.isNaN(appliedAt.getTime()) ? ` · Applied: ${appliedAt.toLocaleDateString()}` : ""}</span>
               </div>
               <div class="admin-row-actions">
-                <button data-action="approve-club-application" data-docid="${app.id}" data-uid="${app.uid}" data-email="${app.email}" data-name="${escapeHtml(app.name || "")}" data-club="${app.clubId}">Approve</button>
+                <button data-action="approve-club-application" data-docid="${app.id}" data-uid="${app.uid || ""}" data-email="${escapeHtml(app.email || "")}" data-name="${escapeHtml(app.name || "")}" data-club="${app.clubId}">Approve</button>
                 <button data-action="reject-club-application" data-docid="${app.id}">Reject</button>
               </div>
-            </div>
-          `).join("")}
-        </article>
-        <article class="admin-card">
-          <span class="section-num">Core</span>
-          <h2>Core approval</h2>
-          ${canManageCore ? `<div class="project-actions" style="margin-bottom:18px">
-            <button class="btn gold" data-action="club-update-leadership" data-docid="${club.id || club.slug}">Update leadership</button>
-            <button class="btn gold" data-action="club-assign-core" data-docid="${club.id || club.slug}">Assign core role</button>
-            <button class="btn secondary" data-action="club-remove-core" data-docid="${club.id || club.slug}">Remove core role</button>
-          </div>` : ""}
-          ${state.hostRequests.filter((item) => item.type === "clubCore" && item.clubId === (club.id || club.slug)).map((item) => adminRow(item.name || item.email, `${item.roleTitle || "Core"} · ${escapeHtml(item.status)}`, item.status === "pending" ? ["Approve", "Reject"] : [], "host", item.id)).join("") || renderEmptyState("No core requests", "Club core requests will appear here after students apply.")}
-        </article>
-        <article class="admin-card">
-          <span class="section-num">Limits</span>
-          <h2>Permission boundary</h2>
-          <div class="admin-checklist">
-            <span>Can host only for ${escapeHtml(club.name)}</span>
-            <span>Can edit this club profile and visible links</span>
-            <span>Primary join link: ${state.host.joinLink || club.join}</span>
-            <span>Can approve core only if president-level access is granted</span>
-            <span>Cannot post for another club or school</span>
-          </div>
+            </div>`;
+          }).join("")}
         </article>
       </div>
     </section>
@@ -293,8 +217,9 @@ export function renderClubAdmin() {
 }
 
 export function renderSuperAdmin() {
+  const clubApps = state.clubApplicants || [];
   const tabs = [
-    ["requests", "Requests", state.hostRequests.length],
+    ["requests", "Requests", state.hostRequests.filter((r) => r.status === "pending").length + clubApps.length],
     ["users", "Users", state.allUsers.length],
     ["schools", "Schools", state.allSchools.length || schools.length],
     ["clubs", "Clubs", state.allClubs.length],
@@ -322,15 +247,39 @@ export function renderSuperAdmin() {
     content = `
       <article class="admin-card wide">
         <span class="section-num">Pending</span>
-        <h2>Pending Requests</h2>
+        <h2>Host &amp; club requests</h2>
+        <p style="font-size:13px;color:#8a7a6a;margin:0 0 16px;">School-rep and new-club requests must be approved here (or set <code>status</code> to <code>approved</code> in Firestore for school-rep only). New clubs still need the Approve button so the club document is created. Club membership apps for clubs with no core team also appear below.</p>
+        <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+          <button style="background:none;border:1.5px solid #c8b89a;padding:4px 10px;font-size:11px;font-weight:700;color:#5a4a3a;cursor:pointer;text-transform:uppercase;" data-action="load-all-club-applicants">Refresh club apps</button>
+        </div>
         ${pending.length ? pending.map((item) => {
-          const typeLabel = item.type === "schoolRepresentative" ? "School Rep" : item.type;
-          return adminRow(item.name || item.email, `${typeLabel} · ${item.roleTitle || "Representative"} · ${item.email}`, ["Approve", "Reject"], "host", item.id);
-        }).join("") : renderEmptyState("No pending requests", "School representative and other requests will appear here.")}
+          const typeLabel = item.type === "schoolRepresentative" ? "School Rep" : item.type === "newClub" ? "New Club" : item.type;
+          const extra = item.type === "schoolRepresentative"
+            ? `${item.description ? ` · ${escapeHtml(item.description)}` : ""}${item.deanDiscussed != null ? ` · Dean discussed: ${item.deanDiscussed ? "Yes" : "No"}` : ""}`
+            : item.type === "newClub"
+              ? ` · ${escapeHtml(item.clubName || "")}`
+              : "";
+          return adminRow(item.name || item.email, `${typeLabel} · ${item.roleTitle || "Representative"} · ${item.email || ""}${extra}`, ["Approve", "Reject"], "host", item.id);
+        }).join("") : renderEmptyState("No pending host requests", "School representative and new club requests will appear here.")}
+        <h3 style="font-size:14px;margin:24px 0 8px;">Pending club membership applications</h3>
+        ${clubApps.length ? clubApps.map((app) => {
+          const clubLabel = (state.allClubs || clubs).find((c) => c.id === app.clubId || c.slug === app.clubId)?.name || app.clubId;
+          return `
+            <div class="admin-row">
+              <div>
+                <strong>${escapeHtml(app.name || app.email)}</strong>
+                <span>${escapeHtml(app.email || "")} · Club: ${escapeHtml(clubLabel || "")}</span>
+              </div>
+              <div class="admin-row-actions">
+                <button data-action="approve-club-application" data-docid="${app.id}" data-uid="${app.uid || ""}" data-email="${escapeHtml(app.email || "")}" data-name="${escapeHtml(app.name || "")}" data-club="${app.clubId}">Approve</button>
+                <button data-action="reject-club-application" data-docid="${app.id}">Reject</button>
+              </div>
+            </div>`;
+        }).join("") : renderEmptyState("No pending club applications", "Membership applications appear here for super-admin review when needed.")}
       </article>
       <article class="admin-card">
         <span class="section-num">History</span>
-        <h2>Resolved</h2>
+        <h2>Resolved host requests</h2>
         ${resolved.length ? resolved.map((item) =>
           `<div class="admin-row"><div><strong>${item.name || item.email}</strong><span>${item.type} · ${escapeHtml(item.status)}</span></div></div>`
         ).join("") : renderEmptyState("No history", "Resolved requests will appear here.")}
@@ -392,16 +341,16 @@ export function renderSuperAdmin() {
       : schools.map((name) => ({ id: name, name, status: "seeded", description: "Default RVU school option" }));
     content = `
       <article class="admin-card wide">
-        <span class="section-num">Registry</span>
-        <h2>School Management</h2>
+        <span class="section-num">Schools</span>
+        <h2>School registry</h2>
         <div class="project-actions" style="margin-bottom:18px">
-          <button class="btn gold" data-action="admin-create-school">Create school</button>
+          <button class="btn gold" data-action="admin-create-school">Add school</button>
         </div>
         ${schoolRows.map((school) => `
           <div class="admin-row">
             <div>
-              <strong>${escapeHtml(school.name)}</strong>
-              <span>${school.shortName || "RVU"} · ${escapeHtml(school.description || "School workspace")} · Status: ${escapeHtml(school.status || "active")}</span>
+              <strong>${escapeHtml(school.name || school.id)}</strong>
+              <span>${escapeHtml(school.description || school.status || "")}</span>
             </div>
             <div class="admin-row-actions">
               ${school.status === "seeded" ? "" : `<button data-action="admin-delete-school" data-docid="${school.id}">Delete</button>`}
@@ -415,25 +364,18 @@ export function renderSuperAdmin() {
   if (state.adminTab === "events") {
     content = `
       <article class="admin-card wide">
-        <span class="section-num">All</span>
-        <h2>Event Management</h2>
-        <div class="project-actions" style="margin-bottom:18px">
-          <button class="btn gold" data-action="admin-create-event">Create event</button>
-        </div>
-        ${state.allEvents.length ? state.allEvents.map((e) => `
+        <span class="section-num">Events</span>
+        <h2>All events</h2>
+        ${(state.allEvents || []).length ? state.allEvents.map((e) => `
           <div class="admin-row">
-            <div>
-              <strong>${escapeHtml(e.title)}</strong>
-              <span>${e.host || e.club || "RVU"} · ${e.date || "No date"} · Status: ${escapeHtml(e.status || "unknown")}</span>
-            </div>
+            <div><strong>${escapeHtml(e.title)}</strong><span>${escapeHtml(e.status || "")} · ${escapeHtml(e.host || e.club || "")}</span></div>
             <div class="admin-row-actions">
-              ${e.status === "published"
-                ? `<button data-action="admin-unpublish-event" data-docid="${e.id}">Unpublish</button>`
-                : `<button data-action="admin-publish-event" data-docid="${e.id}">Publish</button>`}
+              <button data-action="admin-publish-event" data-docid="${e.id}">Publish</button>
+              <button data-action="admin-unpublish-event" data-docid="${e.id}">Unpublish</button>
               <button data-action="admin-delete-event" data-docid="${e.id}">Delete</button>
             </div>
           </div>
-        `).join("") : renderEmptyState("No events", "Events will appear here when created.")}
+        `).join("") : renderEmptyState("No events", "Events will appear here.")}
       </article>
     `;
   }
@@ -441,25 +383,17 @@ export function renderSuperAdmin() {
   if (state.adminTab === "announcements") {
     content = `
       <article class="admin-card wide">
-        <span class="section-num">All</span>
-        <h2>Announcement Management</h2>
-        <div class="project-actions" style="margin-bottom:18px">
-          <button class="btn gold" data-action="admin-create-announcement">Create notice</button>
-        </div>
-        ${state.allAnnouncements.length ? state.allAnnouncements.map((a) => `
+        <span class="section-num">Notices</span>
+        <h2>All announcements</h2>
+        ${(state.allAnnouncements || []).length ? state.allAnnouncements.map((a) => `
           <div class="admin-row">
-            <div>
-              <strong>${escapeHtml(a.title)}</strong>
-              <span>${escapeHtml(a.source || "RVU")} · ${escapeHtml(a.tag || "Update")} · Status: ${escapeHtml(a.status || "unknown")}</span>
-            </div>
+            <div><strong>${escapeHtml(a.title)}</strong><span>${escapeHtml(a.status || "")} · ${escapeHtml(a.source || "")}</span></div>
             <div class="admin-row-actions">
-              ${a.status === "published"
-                ? `<button data-action="admin-unpublish-announcement" data-docid="${a.id}">Unpublish</button>`
-                : ""}
+              <button data-action="admin-unpublish-announcement" data-docid="${a.id}">Unpublish</button>
               <button data-action="admin-delete-announcement" data-docid="${a.id}">Delete</button>
             </div>
           </div>
-        `).join("") : renderEmptyState("No announcements", "Announcements will appear here when created.")}
+        `).join("") : renderEmptyState("No announcements", "Announcements will appear here.")}
       </article>
     `;
   }
@@ -467,20 +401,16 @@ export function renderSuperAdmin() {
   if (state.adminTab === "projects") {
     content = `
       <article class="admin-card wide">
-        <span class="section-num">All</span>
-        <h2>Project Management</h2>
-        <div class="project-actions" style="margin-bottom:18px"></div>
+        <span class="section-num">Projects</span>
+        <h2>All projects</h2>
         ${projects.length ? projects.map((p) => `
           <div class="admin-row">
-            <div>
-              <strong>${escapeHtml(p.title)}</strong>
-              <span>${(p.tags || []).join(", ") || "No tags"} · Status: ${escapeHtml(p.status || "open")} · Owner: ${p.ownerId || "Super admin"}</span>
-            </div>
+            <div><strong>${escapeHtml(p.title)}</strong><span>${escapeHtml(p.status || "")} · ${escapeHtml(p.postedBy || "")}</span></div>
             <div class="admin-row-actions">
               <button data-action="admin-delete-project" data-docid="${p.id}">Delete</button>
             </div>
           </div>
-        `).join("") : renderEmptyState("No projects", "Create a project or wait for verified users to post.")}
+        `).join("") : renderEmptyState("No projects", "Student projects will appear here.")}
       </article>
     `;
   }
@@ -488,11 +418,11 @@ export function renderSuperAdmin() {
   if (state.adminTab === "moderation") {
     content = `
       <article class="admin-card wide">
-        <span class="section-num">Quality</span>
-        <h2>Moderation Flags</h2>
+        <span class="section-num">Flags</span>
+        <h2>Moderation flags</h2>
         ${state.moderationFlags.length ? state.moderationFlags.map((item) =>
           `<div class="admin-row"><div><strong>${item.title || item.reason || "Flag"}</strong><span>${escapeHtml(item.collection || "Content")} · ${escapeHtml(item.status || "Open")}</span></div></div>`
-        ).join("") : renderEmptyState("No moderation flags", "User-created moderation flags will appear here.")}
+        ).join("") : renderEmptyState("No flags", "Reported content will appear here.")}
       </article>
     `;
   }
@@ -500,26 +430,26 @@ export function renderSuperAdmin() {
   return `
     <section class="admin-workspace">
       <div class="admin-summary">
-        <span><strong>${state.hostRequests.filter((r) => r.status === "pending").length}</strong> pending requests</span>
-        <span><strong>${state.allUsers.length}</strong> registered users</span>
-        <span><strong>${state.allClubs.length}</strong> total clubs</span>
+        <span><strong>${state.hostRequests.filter((r) => r.status === "pending").length}</strong> pending host requests</span>
+        <span><strong>${clubApps.length}</strong> pending club apps</span>
       </div>
       ${tabBar}
-      <div class="admin-board">
-        ${content}
-      </div>
+      <div class="admin-board">${content}</div>
     </section>
   `;
 }
 
-export function adminRow(title, meta, actions, mode = "generic", id = "") {
+function adminRow(title, meta, actions, mode, id) {
   return `
     <div class="admin-row">
-      <div><strong>${escapeHtml(title)}</strong><span>${escapeHtml(meta)}</span></div>
+      <div>
+        <strong>${escapeHtml(title || "")}</strong>
+        <span>${meta || ""}</span>
+      </div>
       <div class="admin-row-actions">
         ${actions.map((action) => {
           const dataAction = mode === "host" && action === "Approve" ? "approve-host" : mode === "host" && action === "Reject" ? "reject-host" : "toast";
-          return `<button data-action="${dataAction}" data-request="${id}" data-message="${action}: ${escapeHtml(title)}">${action}</button>`;
+          return `<button data-action="${dataAction}" data-request="${id || ""}">${action}</button>`;
         }).join("")}
       </div>
     </div>
