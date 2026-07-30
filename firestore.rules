@@ -50,8 +50,16 @@ service cloud.firestore {
 
     function isApprovedSchoolRep() {
       return isRvuEmail()
-        && exists(/databases/$(database)/documents/hostRequests/$('schoolRepresentative_' + request.auth.uid))
-        && get(/databases/$(database)/documents/hostRequests/$('schoolRepresentative_' + request.auth.uid)).data.status == 'approved';
+        && (
+          (
+            exists(/databases/$(database)/documents/hostRequests/$('schoolRepresentative_' + request.auth.uid))
+            && get(/databases/$(database)/documents/hostRequests/$('schoolRepresentative_' + request.auth.uid)).data.status == 'approved'
+          )
+          || (
+            exists(/databases/$(database)/documents/users/$(request.auth.uid))
+            && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'schoolRepresentative'
+          )
+        );
     }
 
     function isPublished() {
@@ -130,8 +138,9 @@ service cloud.firestore {
         // Super admin can always write. Approved core members and club founders can create/update
         // their own club's core (e.g. approving a club application via batch write).
         allow create, update: if isSuperAdmin() || isApprovedClubCore(clubId) || isClubFounder(clubId);
-        // Super admin, or the member themselves leaving club core.
+        // Super admin, approved core (removing another member), or the member themselves leaving.
         allow delete: if isSuperAdmin()
+          || isApprovedClubCore(clubId)
           || (isRvuEmail() && (memberEmail == request.auth.token.email || memberEmail == authEmailKey()));
       }
     }

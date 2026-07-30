@@ -362,7 +362,8 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
       && (superAdmin || event.createdBy === auth.currentUser.uid)
     );
     if (canPurge) {
-      await tracedDeleteDoc(doc(db, "events", event.id)).catch(() => {});
+      // Silent purge — avoid permission-trace noise when rules reject a delete.
+      await deleteDoc(doc(db, "events", event.id)).catch(() => {});
     }
   }
 
@@ -376,7 +377,7 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
       const expiryDate = new Date(`${expiry}T23:59:59`);
       if (!Number.isNaN(expiryDate.getTime()) && expiryDate.getTime() < Date.now()) {
         if (auth.currentUser && (superAdmin || project.createdBy === auth.currentUser.uid || project.ownerId === auth.currentUser.uid)) {
-          await tracedDeleteDoc(doc(db, "projects", project.id)).catch(() => {});
+          await deleteDoc(doc(db, "projects", project.id)).catch(() => {});
         }
         continue;
       }
@@ -506,6 +507,21 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
           },
         });
       }
+    }
+
+    // Fallback: users.role = schoolRepresentative (e.g. set directly in Firestore).
+    if (!schoolAccesses.length && (profile.role === "schoolRepresentative" || profile.role === "schoolRep")) {
+      schoolAccesses.push({
+        schoolId: profile.schoolScope || profile.school || "",
+        representative: {
+          email,
+          name: profile.name || email,
+          role: "representative",
+          type: "schoolRepresentative",
+          status: "approved",
+          uid,
+        },
+      });
     }
     data.clubAccesses = memberDocs;
     data.clubAccess = memberDocs[0] || null;
@@ -891,6 +907,12 @@ async function assignClubCoreRole(clubId, { email, name, role }) {
   }, { merge: true });
 }
 
+async function listClubCoreMembers(clubId) {
+  if (!clubId) return [];
+  const snap = await getDocs(collection(db, "clubs", clubId, "coreMembers"));
+  return rows(snap).filter((m) => (m.status || "approved") === "approved");
+}
+
 async function removeClubCoreRole(clubId, email) {
   const normalizedEmail = email.trim().toLowerCase();
   await tracedDeleteDoc(doc(db, "clubs", clubId, "coreMembers", normalizedEmail));
@@ -1256,6 +1278,7 @@ window.RVUFirebase = {
   withdrawClubApplication,
   loadClubPendingApplications,
   loadAllPendingClubApplications,
+  listClubCoreMembers,
   approveClubApplication,
   rejectClubApplication,
   isEventExpired,

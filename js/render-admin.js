@@ -135,8 +135,8 @@ export function renderSchoolAdmin() {
           <h2>School representative tools</h2>
           <p style="font-size:13px;color:#8a7a6a;margin:0 0 16px;">You can post events and announcements for any school using the school dropdown in Create. New school-rep applications are approved only by Super Admin (or by setting the request status to approved in Firestore).</p>
           <div class="project-actions" style="margin-bottom:18px;display:flex;gap:10px;flex-wrap:wrap;">
-            <button class="btn gold" data-action="create-event">Create school event</button>
-            <button class="btn secondary" data-action="create-announcement">Create school notice</button>
+            <button class="btn gold" data-action="create-event" data-mode="school">Create school event</button>
+            <button class="btn secondary" data-action="create-announcement" data-mode="school">Create school notice</button>
           </div>
           <h3 style="font-size:14px;margin:16px 0 8px;">Your recent school events</h3>
           ${schoolEvents.length
