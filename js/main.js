@@ -4,7 +4,7 @@ import { validateEvent, validateAnnouncement, validateProject } from "./validati
 
 import { promptUser, validateClubDraft, replaceCollection } from './utils.js';
 import { schools, interests, events, clubs, announcements, projects, state, defaultClubDraft, app } from './state.js';
-import { isClubCore, isSchoolRep, isSuperAdmin, canHost, activeClub, isAllowedRvuEmail, syncFirebaseData, enterAuthenticatedApp, enterDemoApp, handleSignOut, startFirebaseLogin } from './auth.js';
+import { isClubCore, isSchoolRep, isSuperAdmin, canHost, canManageClub, canManageEvent, activeClub, isAllowedRvuEmail, syncFirebaseData, softRefreshCampusData, startPendingAccessPolling, enterAuthenticatedApp, enterDemoApp, handleSignOut, startFirebaseLogin } from './auth.js';
 import { render, renderAtTop, renderSearchResultsHtml } from './ui.js';
 import { navigate, initRouter } from './router.js';
 
@@ -102,8 +102,7 @@ export function bindEvents() {
   document.querySelectorAll("[data-input]").forEach((field) => {
     field.addEventListener("input", () => {
       const key = field.dataset.input;
-      if (key === "authEmail") state.authEmail = field.value;
-      if (key === "authPassword") state.authPassword = field.value;
+      if (key === "authEmail" || key === "authPassword") return;
       if (key === "studentName") state.user.name = field.value;
       if (key === "hostName") state.host.name = field.value;
       if (key === "hostEmail") state.host.email = field.value;
@@ -219,10 +218,6 @@ export async function handleAction(action, dataset) {
   }
   if (action === "close-login") {
     state.loginOpen = false;
-    state.authPassword = "";
-  }
-  if (action === "auth-mode") {
-    state.authMode = dataset.mode;
   }
   if (action === "login-google") {
     startFirebaseLogin();
@@ -246,21 +241,42 @@ export async function handleAction(action, dataset) {
       });
 
       if (state._onboardingIntent === "school-rep") {
-        await window.RVUFirebase.submitHostRequest({
-          type: "schoolRepresentative",
-          schoolId: state.user.school,
-          name: state.user.name,
-          roleTitle: "Student Representative",
-          description: "Student applying for School Representative role.",
-          approver: "Super Admin",
-        });
-        state.onboardingStep = "host-review";
-        navigate("home");
+        state.onboardingStep = "school-rep-details";
+        renderAtTop();
         return;
       }
     }
     state.onboardingStep = null;
     navigate("home");
+  }
+  if (action === "submit-school-rep-onboarding") {
+    const reason = document.getElementById("sr-onboard-reason")?.value?.trim() || "";
+    const dean = document.querySelector('input[name="sr-onboard-dean"]:checked')?.value;
+    if (!reason || !dean) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Please provide a reason and confirm dean discussion.", type: "error" } }));
+      return;
+    }
+    if (window.RVUFirebase) {
+      try {
+        await window.RVUFirebase.submitHostRequest({
+          type: "schoolRepresentative",
+          schoolId: state.user.school,
+          name: state.user.name,
+          roleTitle: "Student Representative",
+          description: reason,
+          deanDiscussed: dean === "Yes",
+          approver: "Super Admin",
+        });
+      } catch (error) {
+        window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: error.message || "Could not submit application.", type: "error" } }));
+        return;
+      }
+    }
+    state.host.approved = false;
+    state.onboardingStep = "host-review";
+    startPendingAccessPolling();
+    navigate("home");
+    return;
   }
   if (action === "create-new-club-onboarding") {
     state.onboardingStep = "create-club";
@@ -282,6 +298,7 @@ export async function handleAction(action, dataset) {
     state.host.name = state.clubDraft.name;
     state.host.type = "New Club Creation";
     state.onboardingStep = "host-review";
+    startPendingAccessPolling();
     navigate("home");
   }
   if (action === "submit-host") {
@@ -293,13 +310,19 @@ export async function handleAction(action, dataset) {
     }
 
     if (window.RVUFirebase && isClubIntent) {
-      await window.RVUFirebase.submitMultiClubCoreRequest(state.host.selectedClubIds, {
-        name: state.host.name,
-        roleTitle: state.host.roleTitle,
-      });
+      try {
+        await window.RVUFirebase.submitMultiClubCoreRequest(state.host.selectedClubIds, {
+          name: state.host.name,
+          roleTitle: state.host.roleTitle,
+        });
+      } catch (error) {
+        window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: error.message || "Could not submit application.", type: "error" } }));
+        return;
+      }
     }
     state.host.approved = false;
     state.onboardingStep = "host-review";
+    startPendingAccessPolling();
     navigate("home");
   }
   if (action === "host-review") {
@@ -621,13 +644,19 @@ export async function handleAction(action, dataset) {
       return;
     }
     const collab = document.getElementById("ce-collab")?.value || "";
+    const registrationDeadlineRaw = document.getElementById("ce-reg-deadline")?.value || "";
+    const registrationDeadline = registrationDeadlineRaw
+      ? registrationDeadlineRaw.replace("T", " ")
+      : "";
     let club = activeClub();
     const hostClubId = document.getElementById("ce-host-club")?.value;
     if (hostClubId && state.host.clubAccesses) {
       const access = state.host.clubAccesses.find(a => a.club.id === hostClubId || a.club.slug === hostClubId);
       if (access) club = access.club;
     }
-    const payload = isClubCore() ? {
+    const both = isClubCore() && isSchoolRep();
+    const hostMode = both ? (state._createHostMode || "club") : (isClubCore() ? "club" : "school");
+    const payload = hostMode === "club" ? {
       title, description, date, time, location,
       hostType: "club",
       clubId: club.id || club.slug,
@@ -639,17 +668,19 @@ export async function handleAction(action, dataset) {
       linkType: link ? "external" : null,
       posterUrl: posterUrl || null,
       collaboratingClubs: collab ? [collab] : [],
+      registrationDeadline: registrationDeadline || null,
     } : {
       title, description, date, time, location,
       hostType: "school",
-      schoolId: document.getElementById("ce-host-school")?.value || state.host.school,
-      host: document.getElementById("ce-host-school")?.value || state.host.school,
+      schoolId: document.getElementById("ce-host-school")?.value || state.host.school || state.user.school,
+      host: document.getElementById("ce-host-school")?.value || state.host.school || state.user.school,
       type: "School Event",
       tags: [],
       link: link || null,
       posterUrl: posterUrl || null,
       hostName: state.host.name || "",
-      schoolName: document.getElementById("ce-host-school")?.value || state.host.school || "",
+      schoolName: document.getElementById("ce-host-school")?.value || state.host.school || state.user.school || "",
+      registrationDeadline: registrationDeadline || null,
     };
     const newEvent = await window.RVUFirebase.createEvent(payload);
     events.unshift(newEvent);
@@ -701,14 +732,19 @@ export async function handleAction(action, dataset) {
       payload.imageUrl = imageUrl;
     }
 
-    if (isClubCore()) {
-      const club = activeClub();
+    if (isClubCore() && !(isSchoolRep() && (state._createHostMode || "club") === "school")) {
+      let club = activeClub();
+      const hostClubId = document.getElementById("ca-host-club")?.value;
+      if (hostClubId && state.host.clubAccesses) {
+        const access = state.host.clubAccesses.find(a => a.club.id === hostClubId || a.club.slug === hostClubId);
+        if (access) club = access.club;
+      }
       payload.source = club.name;
       payload.sourceType = "club";
       payload.type = "Club";
       payload.clubId = club.id || club.slug;
     } else if (isSchoolRep()) {
-      const selectedSchool = document.getElementById("ca-host-school")?.value || state.host.school;
+      const selectedSchool = document.getElementById("ca-host-school")?.value || state.host.school || state.user.school;
       payload.source = selectedSchool;
       payload.sourceType = "school";
       payload.type = "School";
@@ -917,6 +953,8 @@ export async function handleAction(action, dataset) {
     const title = document.getElementById("ea-title")?.value?.trim();
     const description = document.getElementById("ea-description")?.value?.trim();
     const imageUrl = document.getElementById("ea-image")?.value?.trim() || "";
+    const tag = document.querySelector('input[name="ea-tag"]:checked')?.value || "";
+    const school = document.getElementById("ea-host-school")?.value || "";
     if (!title || !description) {
       window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Title and description required.", type: "info" } }));
       return;
@@ -925,24 +963,25 @@ export async function handleAction(action, dataset) {
       window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Image URL must start with http:// or https://", type: "info" } }));
       return;
     }
-    await window.RVUFirebase.updateDocument("announcements", state.editAnnouncementId, {
+    const patch = {
       title,
       description,
       imageUrl: imageUrl || null,
-    });
+    };
+    if (tag) patch.tag = tag;
+    if (school) {
+      patch.schoolId = school;
+      patch.schoolName = school;
+      patch.source = school;
+    }
+    await window.RVUFirebase.updateDocument("announcements", state.editAnnouncementId, patch);
     const ann = announcements.find(a => a.id === state.editAnnouncementId);
     if (ann) {
-      ann.title = title;
-      ann.description = description;
-      ann.imageUrl = imageUrl || null;
+      Object.assign(ann, patch);
     }
     if (state.allAnnouncements) {
       const annAll = state.allAnnouncements.find(a => a.id === state.editAnnouncementId);
-      if (annAll) {
-        annAll.title = title;
-        annAll.description = description;
-        annAll.imageUrl = imageUrl || null;
-      }
+      if (annAll) Object.assign(annAll, patch);
     }
     state.editAnnouncementOpen = false;
     state.editAnnouncementId = null;
@@ -992,6 +1031,10 @@ export async function handleAction(action, dataset) {
     const location = document.getElementById("ee-location")?.value?.trim() || "";
     const link = document.getElementById("ee-link")?.value?.trim() || "";
     const posterUrl = document.getElementById("ee-poster")?.value?.trim() || "";
+    const registrationDeadlineRaw = document.getElementById("ee-reg-deadline")?.value || "";
+    const registrationDeadline = registrationDeadlineRaw
+      ? registrationDeadlineRaw.replace("T", " ")
+      : "";
     if (!title || !description) {
       window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Title and description required.", type: "info" } }));
       return;
@@ -1012,6 +1055,7 @@ export async function handleAction(action, dataset) {
       location,
       link: link || null,
       posterUrl: posterUrl || null,
+      registrationDeadline: registrationDeadline || null,
     });
     const ev = events.find(e => e.id === state.editEventId);
     if (ev) {
@@ -1022,6 +1066,7 @@ export async function handleAction(action, dataset) {
       ev.location = location;
       ev.link = link || null;
       ev.posterUrl = posterUrl || null;
+      ev.registrationDeadline = registrationDeadline || null;
     }
     if (state.allEvents) {
       const evAll = state.allEvents.find(e => e.id === state.editEventId);
@@ -1033,6 +1078,7 @@ export async function handleAction(action, dataset) {
         evAll.location = location;
         evAll.link = link || null;
         evAll.posterUrl = posterUrl || null;
+        evAll.registrationDeadline = registrationDeadline || null;
       }
     }
     state.editEventOpen = false;
@@ -1043,15 +1089,32 @@ export async function handleAction(action, dataset) {
   if (action === "save-item") {
     if (!window.RVUFirebase || !dataset.docid) return;
     const itemData = { itemId: dataset.docid, type: dataset.kind || "item", title: dataset.title || "", id: dataset.docid };
+    if ((state.savedItems || []).some((s) => (s.itemId === itemData.itemId || s.id === itemData.itemId) && (s.type === itemData.type || !s.type))) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Already saved.", type: "info" } }));
+      return;
+    }
     state.savedItems = [...(state.savedItems || []), itemData];
     render();
     await window.RVUFirebase.saveItem(itemData);
     window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Saved to your campus dashboard.", type: "info" } }));
     return;
   }
+  if (action === "unsave-item") {
+    if (!window.RVUFirebase || !dataset.docid) return;
+    const type = dataset.kind || "item";
+    state.savedItems = (state.savedItems || []).filter((s) => !((s.itemId === dataset.docid || s.id === dataset.docid) && (!s.type || s.type === type || type === "item")));
+    render();
+    await window.RVUFirebase.unsaveItem({ itemId: dataset.docid, type });
+    window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Removed from saved items.", type: "info" } }));
+    return;
+  }
   if (action === "follow-club") {
     if (!window.RVUFirebase || !dataset.docid) return;
-    state.followedClubs = [...(state.followedClubs || []), { clubId: dataset.docid, title: dataset.title || "", id: dataset.docid }];
+    if ((state.followedClubs || []).some((c) => c.clubId === dataset.docid || c.id === dataset.docid)) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Already following.", type: "info" } }));
+      return;
+    }
+    state.followedClubs = [...(state.followedClubs || []), { clubId: dataset.docid, clubName: dataset.title || "", title: dataset.title || "", id: dataset.docid }];
     render();
     await window.RVUFirebase.followClub(dataset.docid, dataset.title || "");
     window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Club followed.", type: "info" } }));
@@ -1062,6 +1125,61 @@ export async function handleAction(action, dataset) {
     state.followedClubs = (state.followedClubs || []).filter(c => c.clubId !== dataset.docid && c.id !== dataset.docid);
     render();
     await window.RVUFirebase.unfollowClub(dataset.docid);
+    window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Unfollowed.", type: "info" } }));
+    return;
+  }
+  if (action === "leave-club-core") {
+    if (!window.RVUFirebase || !dataset.docid) return;
+    if (!window.confirm(`Leave club core for ${dataset.title || "this club"}? You will lose hosting rights for this club.`)) return;
+    try {
+      await window.RVUFirebase.leaveClubCore(dataset.docid);
+      state.host.clubAccesses = (state.host.clubAccesses || []).filter((a) => (a.club?.id || a.club?.slug) !== dataset.docid);
+      if (state.host.clubSlug === dataset.docid) {
+        const next = state.host.clubAccesses[0];
+        state.host.clubSlug = next ? (next.club.id || next.club.slug) : "";
+      }
+      state._hasClubCore = (state.host.clubAccesses || []).length > 0;
+      if (state._hasClubCore) {
+        state.role = "club-core";
+        state.host.approved = true;
+      } else if (state._hasSchoolRep || isSchoolRep()) {
+        state._hasClubCore = false;
+        state.role = "school-rep";
+        state.host.approved = true;
+      } else {
+        state.role = "student";
+        state.host.approved = false;
+      }
+      await softRefreshCampusData({ showSkeleton: false });
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "You left club core for this club.", type: "info" } }));
+    } catch (e) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: e.message || "Could not leave club.", type: "error" } }));
+    }
+    return;
+  }
+  if (action === "set-create-host-mode") {
+    state._createHostMode = dataset.mode === "school" ? "school" : "club";
+    render();
+    return;
+  }
+  if (action === "load-all-club-applicants") {
+    if (!window.RVUFirebase || !isSuperAdmin()) return;
+    try {
+      state._clubApplicantsLoading = true;
+      renderAtTop();
+      state.clubApplicants = await window.RVUFirebase.loadAllPendingClubApplications();
+      state._clubApplicantsLoaded = true;
+    } catch (e) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: e.message || "Could not load club applications.", type: "error" } }));
+    } finally {
+      state._clubApplicantsLoading = false;
+      renderAtTop();
+    }
+    return;
+  }
+  if (action === "soft-refresh") {
+    await softRefreshCampusData({ showSkeleton: false });
+    window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Campus data refreshed.", type: "info" } }));
     return;
   }
 
@@ -1225,8 +1343,9 @@ export async function handleAction(action, dataset) {
           approver: "Super Admin",
         });
         state._schoolRepApplyModalOpen = false;
+        startPendingAccessPolling();
         renderAtTop();
-        window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "School rep application submitted for review.", type: "success" } }));
+        window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "School rep application submitted for Super Admin review.", type: "success" } }));
       } catch (e) {
         window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Failed to apply.", type: "error" } }));
       }
@@ -1236,14 +1355,35 @@ export async function handleAction(action, dataset) {
 
 
   if (action === "load-club-applicants") {
-    if (!window.RVUFirebase || !dataset.club) return;
+    if (!window.RVUFirebase) return;
+    let clubIds = dataset.club
+      ? [dataset.club]
+      : (state.host.clubAccesses || []).map((access) => access.club?.id || access.club?.slug).filter(Boolean);
+    if (!clubIds.length) {
+      const fallback = activeClub();
+      if (fallback?.id || fallback?.slug) clubIds = [fallback.id || fallback.slug];
+    }
+    if (!clubIds.length) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "No club is linked to your core membership yet.", type: "error" } }));
+      return;
+    }
     try {
-      const apps = await window.RVUFirebase.loadClubPendingApplications(dataset.club);
-      state.clubApplicants = apps;
+      state._clubApplicantsLoading = true;
+      renderAtTop();
+      const nested = await Promise.all(clubIds.map((clubId) => window.RVUFirebase.loadClubPendingApplications(clubId)));
+      const seen = new Set();
+      state.clubApplicants = nested.flat().filter((app) => {
+        if (!app?.id || seen.has(app.id)) return false;
+        seen.add(app.id);
+        return true;
+      });
       state._clubApplicantsLoaded = true;
+      state._clubApplicantsLoading = false;
       renderAtTop();
     } catch (e) {
-      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Failed to load applications.", type: "error" } }));
+      state._clubApplicantsLoading = false;
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: e.message || "Failed to load applications.", type: "error" } }));
+      renderAtTop();
     }
     return;
   }
@@ -1258,9 +1398,9 @@ export async function handleAction(action, dataset) {
       });
       state.clubApplicants = state.clubApplicants.filter(a => a.id !== dataset.docid);
       renderAtTop();
-      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Application approved.", type: "info" } }));
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Application approved. They are now club core.", type: "info" } }));
     } catch (e) {
-      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Error approving.", type: "error" } }));
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: e.message || "Error approving.", type: "error" } }));
     }
     return;
   }
@@ -1273,7 +1413,61 @@ export async function handleAction(action, dataset) {
       renderAtTop();
       window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Application rejected.", type: "info" } }));
     } catch (e) {
-      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Error rejecting.", type: "error" } }));
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: e.message || "Error rejecting.", type: "error" } }));
+    }
+    return;
+  }
+  if (action === "open-external-link") {
+    if (dataset.url) window.open(dataset.url, "_blank", "noopener,noreferrer");
+    return;
+  }
+  if (action === "open-edit-club") {
+    const club = clubs.find((item) => item.id === dataset.docid || item.slug === dataset.docid);
+    if (!canManageClub(club)) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Only club core members of this club can edit it.", type: "error" } }));
+      return;
+    }
+    state.editClubOpen = true;
+    state.editClubId = dataset.docid;
+    renderAtTop();
+    return;
+  }
+  if (action === "close-edit-club") {
+    state.editClubOpen = false;
+    state.editClubId = null;
+    renderAtTop();
+    return;
+  }
+  if (action === "submit-edit-club") {
+    if (!window.RVUFirebase || !dataset.docid) return;
+    const club = clubs.find((item) => item.id === dataset.docid || item.slug === dataset.docid);
+    if (!canManageClub(club)) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Only club core members of this club can edit it.", type: "error" } }));
+      return;
+    }
+    const tagline = document.getElementById("ec-tagline")?.value?.trim() || "";
+    const description = document.getElementById("ec-description")?.value?.trim() || "";
+    const doing = document.getElementById("ec-doing")?.value?.trim() || "";
+    const joinLink = document.getElementById("ec-join")?.value?.trim() || "";
+    if (joinLink && !/^https?:\/\//.test(joinLink)) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Join link must start with http:// or https://", type: "info" } }));
+      return;
+    }
+    try {
+      await window.RVUFirebase.updateClubProfile(dataset.docid, {
+        tagline,
+        description,
+        doing,
+        join: joinLink,
+        joinLink,
+      });
+      Object.assign(club, { tagline, description, doing, join: joinLink, joinLink });
+      state.editClubOpen = false;
+      state.editClubId = null;
+      renderAtTop();
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Club profile updated.", type: "info" } }));
+    } catch (e) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: e.message || "Could not update club.", type: "error" } }));
     }
     return;
   }

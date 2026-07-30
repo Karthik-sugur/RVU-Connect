@@ -52,9 +52,6 @@ export const state = {
   dataLoading: false,
   authUser: null,
   loginOpen: false,
-  authMode: "signin",
-  authEmail: "",
-  authPassword: "",
   hostRequests: [],
   moderationFlags: [],
   onboardingStep: "role",
@@ -123,6 +120,8 @@ export const state = {
   _clubApplicantsLoaded: false,
   // Modal flags
   _clubApplyModalOpen: false,
+  editClubOpen: false,
+  editClubId: null,
 };
 
 export const app = document.querySelector("#app");
