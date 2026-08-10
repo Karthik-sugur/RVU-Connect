@@ -62,6 +62,7 @@ export async function renderCurrentRoute() {
       state._loadedClubCoreFor = clubId;
       state._clubCoreMembersLoading = true;
       try {
+        // listClubCoreMembers also repairs approved apps missing a coreMembers doc
         state.clubCoreMembers = await window.RVUFirebase.listClubCoreMembers(clubId) || [];
       } catch (_) {
         state.clubCoreMembers = [];

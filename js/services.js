@@ -1,5 +1,5 @@
 import { app, auth, db, analytics } from "./firebase-init.js";
-import { getDoc, getDocs, setDoc, updateDoc, deleteDoc, deleteField, doc, collection, collectionGroup, query, where, orderBy, limit, startAfter, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
+import { getDoc, getDocs, setDoc, updateDoc, deleteDoc, deleteField, doc, collection, query, where, orderBy, limit, startAfter, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import { handleFirebaseError } from "./errors.js";
 import { EMAIL_DOMAIN } from "./constants.js";
@@ -306,7 +306,7 @@ async function ensureUserProfile(user) {
   // Temporary: Always create new profiles as student.
   // The architecture for role assignment (clubCore, superAdmin) will be moved to Cloud Functions.
   const profile = {
-    email: user.email,
+    email: String(user.email || "").trim().toLowerCase(),
     name: user.displayName || user.email.split("@")[0],
     role: "student",
     clubIds: [],
@@ -331,6 +331,143 @@ async function saveUserProfile(uid, data) {
 }
 
 let lastDocs = { events: null, announcements: null, projects: null };
+
+/**
+ * Resolve club-core access with direct document reads (no collectionGroup).
+ * Source of truth: clubs/{clubId}/coreMembers/{emailLower} with status == approved.
+ */
+async function resolveOwnClubAccesses({ uid, email, clubs, clubApplications, profile = {} }) {
+  const emailKey = String(email || "").trim().toLowerCase();
+  if (!emailKey) return [];
+
+  const clubById = new Map((clubs || []).map((c) => [c.id, c]));
+  const candidateIds = new Set((clubs || []).map((c) => c.id).filter(Boolean));
+
+  for (const app of clubApplications || []) {
+    if (app?.status === "approved" && app.clubId) candidateIds.add(app.clubId);
+  }
+
+  const memberDocs = [];
+  const seen = new Set();
+
+  await Promise.all([...candidateIds].map(async (clubId) => {
+    try {
+      const memberSnap = await getDoc(doc(db, "clubs", clubId, "coreMembers", emailKey));
+      if (!memberSnap.exists()) return;
+      const member = { id: memberSnap.id, ...memberSnap.data() };
+      if ((member.status || "approved") !== "approved") return;
+
+      let club = clubById.get(clubId);
+      if (!club) {
+        const clubSnap = await getDoc(doc(db, "clubs", clubId));
+        if (!clubSnap.exists()) return;
+        club = { id: clubSnap.id, ...clubSnap.data() };
+        if (club.status && club.status !== "approved") return;
+      }
+
+      if (seen.has(club.id)) return;
+      seen.add(club.id);
+      // Backfill uid when missing so future lookups stay consistent.
+      if (uid && !member.uid) {
+        updateDoc(memberSnap.ref, { uid, updatedAt: serverTimestamp() }).catch(() => {});
+      }
+      memberDocs.push({ club, member: { ...member, uid: member.uid || uid, email: member.email || emailKey } });
+    } catch (_) {
+      /* ignore single-club read failures */
+    }
+  }));
+
+  // Founder email still unlocks manage UI if coreMembers was never written (legacy clubs).
+  for (const club of clubs || []) {
+    const founder = String(club.founderEmail || "").trim().toLowerCase();
+    if (!founder || founder !== emailKey) continue;
+    if (seen.has(club.id)) continue;
+    seen.add(club.id);
+    memberDocs.push({
+      club,
+      member: {
+        email: emailKey,
+        name: club.founderName || profile.name || emailKey,
+        role: "founder",
+        status: "approved",
+        uid,
+      },
+    });
+  }
+
+  return memberDocs;
+}
+
+/**
+ * Restore own coreMembers when missing.
+ * Allowed by rules when clubs/{clubId}/coreMembers/{email} already exists (uid backfill),
+ * or when clubApplications/{clubId}_{uid} is approved (deterministic apps).
+ */
+async function ensureOwnCoreMembersFromApplications({ uid, email, clubApplications, name }) {
+  const emailKey = String(email || "").trim().toLowerCase();
+  if (!uid || !emailKey) return;
+  const approved = (clubApplications || []).filter((a) => a.status === "approved" && a.clubId);
+  for (const app of approved) {
+    const memberRef = doc(db, "clubs", app.clubId, "coreMembers", emailKey);
+    try {
+      const snap = await getDoc(memberRef);
+      if (snap.exists() && (snap.data()?.status || "approved") === "approved") {
+        if (!snap.data()?.uid) {
+          await updateDoc(memberRef, { uid, updatedAt: serverTimestamp() }).catch(() => {});
+        }
+        continue;
+      }
+      // Self-heal membership only when deterministic approved application exists (rules-enforced).
+      const deterministicId = `${app.clubId}_${uid}`;
+      const detSnap = await getDoc(doc(db, "clubApplications", deterministicId));
+      if (!(detSnap.exists() && detSnap.data()?.status === "approved")) continue;
+      await setDoc(memberRef, {
+        uid,
+        email: emailKey,
+        name: name || app.name || emailKey.split("@")[0],
+        role: "core",
+        status: "approved",
+        healedFromApplication: deterministicId,
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+    } catch (_) {
+      /* fellow core / super-admin repair covers legacy auto-id apps */
+    }
+  }
+}
+
+/** Club cores: rewrite missing coreMembers docs from approved applications for a club. */
+async function ensureCoreMembersFromApprovedApps(clubId) {
+  if (!clubId || !auth.currentUser) return 0;
+  const snap = await getDocs(query(
+    collection(db, "clubApplications"),
+    where("clubId", "==", clubId),
+    where("status", "==", "approved"),
+    limit(50)
+  ));
+  let fixed = 0;
+  for (const row of snap.docs) {
+    const data = row.data() || {};
+    const emailKey = String(data.email || "").trim().toLowerCase();
+    if (!emailKey) continue;
+    const memberRef = doc(db, "clubs", clubId, "coreMembers", emailKey);
+    const memberSnap = await getDoc(memberRef);
+    if (memberSnap.exists() && (memberSnap.data()?.status || "approved") === "approved" && memberSnap.data()?.uid) {
+      continue;
+    }
+    await setDoc(memberRef, {
+      uid: data.uid || memberSnap.data()?.uid || "",
+      email: emailKey,
+      name: data.name || emailKey.split("@")[0],
+      role: "core",
+      status: "approved",
+      repairedFromApplication: row.id,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+    fixed += 1;
+  }
+  return fixed;
+}
 
 async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
   const [eventsSnap, announcementsSnap, projectsSnap] = await Promise.all([
@@ -418,40 +555,32 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
       rowsOrEmpty("club applications", getDocs(query(collection(db, "clubApplications"), where("uid", "==", uid), limit(20)))),
     ]);
     const ownHostRequests = await rowsOrEmpty("host requests", getDocs(query(collection(db, "hostRequests"), where("uid", "==", uid), limit(50))));
-    // Single collection group query replacing N+1 lookups
-    const memberDocs = [];
-    const memberSnaps = await Promise.all([
-      getDocs(query(collectionGroup(db, "coreMembers"), where("uid", "==", uid))).catch(() => ({ docs: [] })),
-      getDocs(query(collectionGroup(db, "coreMembers"), where("email", "==", email))).catch(() => ({ docs: [] })),
-    ]);
-    const seenMemberRefs = new Set();
-    for (const docSnap of memberSnaps.flatMap((snap) => snap.docs)) {
-      if (seenMemberRefs.has(docSnap.ref.path)) continue;
-      seenMemberRefs.add(docSnap.ref.path);
-      const member = { id: docSnap.id, ...docSnap.data() };
-      if (member.status !== "approved") continue;
-      const clubId = docSnap.ref.parent.parent?.id;
-      const club = data.clubs.find(c => c.id === clubId || c.slug === clubId);
-      if (club) {
-        memberDocs.push({ club, member });
-      }
-    }
 
-    // Founder email on the club doc also grants club-core access (approve applicants / manage club).
-    for (const club of data.clubs) {
-      const founder = String(club.founderEmail || "").trim().toLowerCase();
-      if (!founder || founder !== email) continue;
-      if (memberDocs.some((access) => access.club.id === club.id || access.club.slug === club.id)) continue;
-      memberDocs.push({
-        club,
-        member: {
-          email,
-          name: club.founderName || profile.name || email,
-          role: "founder",
-          status: "approved",
-          uid,
-        },
+    // Direct coreMembers/{email} reads — reliable. Do not depend on collectionGroup queries.
+    const memberDocs = await resolveOwnClubAccesses({
+      uid,
+      email,
+      clubs: data.clubs,
+      clubApplications: clubAppRows,
+      profile,
+    });
+
+    // Self-heal: if an application is approved but coreMembers is missing, restore it when rules allow
+    // (deterministic app id) or when the membership doc already exists under another path.
+    await ensureOwnCoreMembersFromApplications({ uid, email, clubApplications: clubAppRows, name: profile.name });
+    // Re-resolve after heal so access unlocks on the same login.
+    if (clubAppRows.some((a) => a.status === "approved")) {
+      const healed = await resolveOwnClubAccesses({
+        uid,
+        email,
+        clubs: data.clubs,
+        clubApplications: clubAppRows,
+        profile,
       });
+      const seen = new Set(memberDocs.map((m) => m.club.id));
+      for (const access of healed) {
+        if (!seen.has(access.club.id)) memberDocs.push(access);
+      }
     }
 
     const schoolAccesses = [];
@@ -703,18 +832,21 @@ async function submitMultiClubCoreRequest(clubIds, { name, roleTitle }) {
 
   const email = user.email.trim().toLowerCase();
   const uid = user.uid;
-  const approvedSnaps = await Promise.all([
-    getDocs(query(collectionGroup(db, "coreMembers"), where("uid", "==", uid))).catch(() => ({ docs: [] })),
-    getDocs(query(collectionGroup(db, "coreMembers"), where("email", "==", email))).catch(() => ({ docs: [] })),
-  ]);
-  const approvedClubIds = new Set();
-  for (const snap of approvedSnaps) {
-    for (const memberDoc of snap.docs) {
-      if (memberDoc.data()?.status !== "approved") continue;
-      const clubId = memberDoc.ref.parent.parent?.id;
-      if (clubId) approvedClubIds.add(clubId);
+  const approvedAppSnap = await getDocs(query(
+    collection(db, "clubApplications"),
+    where("uid", "==", uid),
+    where("status", "==", "approved"),
+    limit(10)
+  ));
+  const approvedClubIds = new Set(approvedAppSnap.docs.map((d) => d.data()?.clubId).filter(Boolean));
+  // Also treat existing coreMembers as already joined (direct reads).
+  await Promise.all([...new Set(clubIds)].map(async (clubId) => {
+    const snap = await getDoc(doc(db, "clubs", clubId, "coreMembers", email));
+    if (snap.exists() && (snap.data()?.status || "approved") === "approved") {
+      approvedClubIds.add(clubId);
     }
-  }
+  }));
+
   const newClubIds = [...new Set(clubIds.filter((id) => !approvedClubIds.has(id)))];
   if (approvedClubIds.size + newClubIds.length > 5) {
     throw new Error("You can be club core for at most 5 clubs.");
@@ -789,11 +921,23 @@ async function applyNewClubApproval(requestData) {
   }
 
   if (requestData.uid) {
+    // merge keeps schoolRepApproved if they already have school-rep
     await tracedSetDoc(doc(db, "users", requestData.uid), {
       role: "clubCore",
       clubCoreApproved: true,
       updatedAt: serverTimestamp(),
     }, { merge: true });
+    if (normalizedEmail) {
+      await tracedSetDoc(doc(db, "clubApplications", `${clubId}_${requestData.uid}`), {
+        uid: requestData.uid,
+        email: normalizedEmail,
+        name: requestData.name || requestData.founderName || normalizedEmail.split("@")[0],
+        clubId,
+        status: "approved",
+        source: "newClub",
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+    }
   }
 
   return clubId;
@@ -929,6 +1073,8 @@ async function createClub(payload) {
   const founderEmail = payload.founderEmail?.trim().toLowerCase();
   const facultyAdvisorEmail = payload.facultyAdvisorEmail?.trim().toLowerCase();
   const currentPresidentEmail = payload.currentPresidentEmail?.trim().toLowerCase();
+  const actorEmail = auth.currentUser?.email?.trim().toLowerCase() || "";
+  const actorUid = auth.currentUser?.uid || "";
   const ref = await tracedAddDoc(collection(db, "clubs"), {
     ...payload,
     founderEmail,
@@ -937,7 +1083,7 @@ async function createClub(payload) {
     status: payload.status || "approved",
     registrationOpen: payload.registrationOpen || false,
     highlights: payload.highlights || [],
-    createdBy: auth.currentUser?.uid,
+    createdBy: actorUid,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
@@ -952,8 +1098,9 @@ async function createClub(payload) {
 
   await Promise.all(foundingMembers.map((member) => tracedSetDoc(doc(db, "clubs", ref.id, "coreMembers", member.email), {
     ...member,
+    uid: member.email === actorEmail ? actorUid : "",
     status: "approved",
-    assignedBy: auth.currentUser?.uid,
+    assignedBy: actorUid,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   })));
@@ -998,10 +1145,11 @@ async function grantPlatformRole({ email, uid, role }) {
   await updateUserRole(uid, role || "student");
 }
 
-async function assignClubCoreRole(clubId, { email, name, role }) {
+async function assignClubCoreRole(clubId, { email, name, role, uid }) {
   const normalizedEmail = email.trim().toLowerCase();
   await tracedSetDoc(doc(db, "clubs", clubId, "coreMembers", normalizedEmail), {
     email: normalizedEmail,
+    uid: uid || "",
     name: name || normalizedEmail.split("@")[0],
     role: role || "core",
     status: "approved",
@@ -1012,6 +1160,12 @@ async function assignClubCoreRole(clubId, { email, name, role }) {
 
 async function listClubCoreMembers(clubId) {
   if (!clubId) return [];
+  // Repair approved applications that never got a coreMembers doc (legacy / failed discovery).
+  try {
+    await ensureCoreMembersFromApprovedApps(clubId);
+  } catch (_) {
+    /* listing still works even if repair is denied */
+  }
   const snap = await getDocs(collection(db, "clubs", clubId, "coreMembers"));
   return rows(snap).filter((m) => (m.status || "approved") === "approved");
 }
@@ -1178,8 +1332,22 @@ async function submitClubApplication(clubId) {
 
   const email = user.email.trim().toLowerCase();
   const uid = user.uid;
+  const applicationId = `${clubId}_${uid}`;
 
-  // Check for duplicate active (pending) application to the same club
+  // Deterministic doc: one application per user per club (re-apply after reject/withdraw).
+  const existingRef = doc(db, "clubApplications", applicationId);
+  const existingSnap = await getDoc(existingRef);
+  if (existingSnap.exists()) {
+    const status = existingSnap.data()?.status;
+    if (status === "pending") {
+      throw new Error("You already have a pending application for this club.");
+    }
+    if (status === "approved") {
+      throw new Error("You are already approved for this club.");
+    }
+  }
+
+  // Also block legacy auto-id pending apps for the same club.
   const dupSnap = await getDocs(query(
     collection(db, "clubApplications"),
     where("uid", "==", uid),
@@ -1191,44 +1359,42 @@ async function submitClubApplication(clubId) {
     throw new Error("You already have a pending application for this club.");
   }
 
-  // Enforce max 5 clubs: approved memberships + pending applications
-  const approvedSnaps = await Promise.all([
-    getDocs(query(collectionGroup(db, "coreMembers"), where("uid", "==", uid))).catch(() => ({ docs: [] })),
-    getDocs(query(collectionGroup(db, "coreMembers"), where("email", "==", email))).catch(() => ({ docs: [] })),
-  ]);
-  const approvedClubIds = new Set();
-  for (const snap of approvedSnaps) {
-    for (const memberDoc of snap.docs) {
-      if (memberDoc.data()?.status !== "approved") continue;
-      const clubIdApproved = memberDoc.ref.parent.parent?.id;
-      if (clubIdApproved) approvedClubIds.add(clubIdApproved);
-    }
-  }
-  if (approvedClubIds.has(clubId)) {
+  const memberSnap = await getDoc(doc(db, "clubs", clubId, "coreMembers", email));
+  if (memberSnap.exists() && (memberSnap.data()?.status || "approved") === "approved") {
     throw new Error("You are already club core for this club.");
   }
-  const activeSnap = await getDocs(query(
-    collection(db, "clubApplications"),
-    where("uid", "==", uid),
-    where("status", "==", "pending"),
-    limit(10)
-  ));
-  if (approvedClubIds.size + activeSnap.size >= 5) {
+
+  const [approvedAppSnap, pendingSnap] = await Promise.all([
+    getDocs(query(
+      collection(db, "clubApplications"),
+      where("uid", "==", uid),
+      where("status", "==", "approved"),
+      limit(10)
+    )),
+    getDocs(query(
+      collection(db, "clubApplications"),
+      where("uid", "==", uid),
+      where("status", "==", "pending"),
+      limit(10)
+    )),
+  ]);
+  if (approvedAppSnap.size + pendingSnap.size >= 5) {
     throw new Error("You can be club core for at most 5 clubs (including pending applications).");
   }
 
   const userSnap = await getDoc(doc(db, "users", uid));
   const name = userSnap.exists() ? (userSnap.data().name || user.displayName || email.split("@")[0]) : (user.displayName || email.split("@")[0]);
 
-  const ref = await tracedAddDoc(collection(db, "clubApplications"), {
+  await tracedSetDoc(existingRef, {
     uid,
     email,
     name,
     clubId,
     status: "pending",
-    createdAt: serverTimestamp(),
-  });
-  return { id: ref.id, uid, email, name, clubId, status: "pending" };
+    createdAt: existingSnap.exists() ? (existingSnap.data()?.createdAt || serverTimestamp()) : serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  }, { merge: true });
+  return { id: applicationId, uid, email, name, clubId, status: "pending" };
 }
 
 async function withdrawClubApplication(applicationId) {
@@ -1252,16 +1418,37 @@ async function approveClubApplication(applicationId, applicationData) {
   const { uid, email, name, clubId } = applicationData;
   if (!clubId || !email) throw new Error("Missing clubId or email in application data.");
   const normalizedEmail = email.trim().toLowerCase();
+  const applicantUid = uid || "";
 
   const batch = tracedWriteBatch("approveClubApplication");
-  batch.update(doc(db, "clubApplications", applicationId), {
+  batch.set(doc(db, "clubApplications", applicationId), {
     status: "approved",
+    uid: applicantUid,
+    email: normalizedEmail,
+    name: name || normalizedEmail.split("@")[0],
+    clubId,
     updatedAt: serverTimestamp(),
-  });
-  // Every approved club core member has equal permissions (role title is informational only).
-  // Hosting authority comes from coreMembers — do not write users.role here (only super admins may change another user's role).
+  }, { merge: true });
+
+  // Mirror to deterministic id so the applicant can self-heal coreMembers on login.
+  if (applicantUid) {
+    const deterministicId = `${clubId}_${applicantUid}`;
+    if (applicationId !== deterministicId) {
+      batch.set(doc(db, "clubApplications", deterministicId), {
+        status: "approved",
+        uid: applicantUid,
+        email: normalizedEmail,
+        name: name || normalizedEmail.split("@")[0],
+        clubId,
+        mirroredFrom: applicationId,
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+    }
+  }
+
+  // Source of truth for hosting rights.
   batch.set(doc(db, "clubs", clubId, "coreMembers", normalizedEmail), {
-    uid: uid || "",
+    uid: applicantUid,
     email: normalizedEmail,
     name: name || normalizedEmail.split("@")[0],
     role: "core",
@@ -1458,6 +1645,7 @@ window.RVUFirebase = {
   loadClubPendingApplications,
   loadAllPendingClubApplications,
   listClubCoreMembers,
+  ensureCoreMembersFromApprovedApps,
   repairSchoolRepGrants,
   assertCanCreateSchoolContent,
   approveClubApplication,
