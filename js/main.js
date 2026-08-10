@@ -1470,7 +1470,7 @@ export async function handleAction(action, dataset) {
       });
       state.clubApplicants = state.clubApplicants.filter(a => a.id !== dataset.docid);
       renderAtTop();
-      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Application approved. They are now club core.", type: "info" } }));
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Approved. Ask them to refresh once — Admin unlocks from their core membership.", type: "success" } }));
     } catch (e) {
       window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: e.message || "Error approving.", type: "error" } }));
     }

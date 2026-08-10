@@ -225,6 +225,7 @@ export async function syncFirebaseData({ quiet = false } = {}) {
     superAdmin: "admin",
     clubCore: "club-core",
     schoolRepresentative: "school-rep",
+    schoolRep: "school-rep",
     student: "student",
   };
   state.role = roleMap[profile.role] || "student";
