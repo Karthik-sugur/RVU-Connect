@@ -54,7 +54,10 @@ export const state = {
   loginOpen: false,
   hostRequests: [],
   moderationFlags: [],
-  onboardingStep: "role",
+  // Never default to a step. syncFirebaseData() renders once before the profile has loaded, so
+  // defaulting to "role" flashed the onboarding modal at every returning user on every login.
+  // applyOnboardingState() raises this only for accounts with no history at all.
+  onboardingStep: null,
   role: null,
   createOpen: false,
   selectedClubSlug: null,

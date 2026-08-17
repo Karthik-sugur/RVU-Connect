@@ -267,25 +267,8 @@ export async function syncFirebaseData({ quiet = false } = {}) {
   if (profile.roleTitle) state.host.roleTitle = profile.roleTitle;
   if (profile.hostName) state.host.name = profile.hostName;
   if (profile.hostApproved !== undefined) state.host.approved = profile.hostApproved;
-  if (profile.role === "superAdmin" || profile.onboardingComplete) {
-    state.onboardingStep = null;
-  } else if (!state.onboardingStep) {
-    state.onboardingStep = "role";
-  }
   const data = await window.RVUFirebase.loadCampusData({ superAdmin: state.role === "admin", profile });
   state.loadErrors = data.loadErrors || [];
-
-  // A submitted request/application counts as onboarded even while pending, or the blocking
-  // role-picker modal re-opens on every load with no way to finish or exit.
-  const hasSubmittedHostIntent = (data.hostRequests || []).length > 0
-    || (data.clubApplications || []).length > 0;
-  if (hasSubmittedHostIntent && state.onboardingStep) {
-    state.onboardingStep = null;
-    if (!profile.onboardingComplete) {
-      window.RVUFirebase.saveUserProfile(state.authUser.uid, { onboardingComplete: true })
-        .catch((error) => console.warn("[RVU] Could not persist onboardingComplete", error));
-    }
-  }
   replaceCollection(clubs, data.clubs);
   replaceCollection(events, data.events.map(normalizeEvent));
   replaceCollection(announcements, data.announcements);
@@ -314,7 +297,6 @@ export async function syncFirebaseData({ quiet = false } = {}) {
     state.host.roleTitle = data.clubAccess.member.role || "core";
     state.host.name = data.clubAccess.member.name || data.clubAccess.club.name;
     state.host.approved = true;
-    state.onboardingStep = null;
   } else {
     state.host.clubAccesses = data.clubAccesses || [];
   }
@@ -329,12 +311,58 @@ export async function syncFirebaseData({ quiet = false } = {}) {
       state.host.name = data.schoolAccess.representative.name || state.host.name;
     }
     state.host.approved = true;
-    state.onboardingStep = null;
   } else {
     state.host.schoolAccesses = data.schoolAccesses || [];
   }
+
+  applyOnboardingState(profile, data);
+
   state.dataLoaded = true;
   state.dataLoading = false;
+}
+
+/**
+ * Decide, once, whether this sign-in should show onboarding.
+ *
+ * Onboarding is for genuinely NEW accounts only. It must never be the default: `onboardingStep`
+ * starts null and is only raised here, after the profile and campus data are known.
+ *
+ * `onboardingComplete` alone is not a sufficient test. Accounts created before that flag existed
+ * do not carry it, so keying off it directly re-ran onboarding on every single login, forever.
+ * Any other evidence of an established account counts too, and when we infer it we persist the
+ * flag so the repair happens once rather than on every sign-in.
+ */
+function applyOnboardingState(profile, data) {
+  const established =
+    profile.onboardingComplete === true
+    || profile.role === "superAdmin"
+    || state.role !== "student"
+    || state._hasClubCore
+    || state._hasSchoolRep
+    // Already picked a role and filled the profile in.
+    || Boolean(profile.school)
+    || Boolean(profile.year)
+    || (Array.isArray(profile.interests) && profile.interests.length > 0)
+    // Already asked for a role, even if still pending.
+    || (data.hostRequests || []).length > 0
+    || (data.clubApplications || []).length > 0
+    // Already used the app.
+    || (data.savedItems || []).length > 0
+    || (data.followedClubs || []).length > 0;
+
+  if (established) {
+    state.onboardingStep = null;
+    if (profile.onboardingComplete !== true) {
+      // One-time repair so this account is never asked again.
+      window.RVUFirebase.saveUserProfile(state.authUser.uid, { onboardingComplete: true })
+        .catch((error) => console.warn("[RVU] Could not persist onboardingComplete", error));
+    }
+    return;
+  }
+
+  // Genuinely new: no profile data, no roles, no activity. Start onboarding, unless the user is
+  // already partway through it in this session.
+  if (!state.onboardingStep) state.onboardingStep = "role";
 }
 
 /** Local Date for an event's start, or null when the date is not a parseable YYYY-MM-DD. */
@@ -455,7 +483,9 @@ export function resetSessionState() {
   state.isDemoMode = false;
   state.dataLoaded = false;
   state.dataLoading = false;
-  state.onboardingStep = "role";
+  // Not "role" — the next sign-in decides from that account's own profile. Re-arming it here
+  // showed onboarding to the next user before their profile had even loaded.
+  state.onboardingStep = null;
   state.route = "home";
   state.user = { name: "", school: schools[0], year: "1", interests: [] };
 
