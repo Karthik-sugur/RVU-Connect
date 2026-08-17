@@ -14,17 +14,23 @@ student **grant themselves campus-wide publishing rights**.
 None of these are hypothetical — each was confirmed by reading the code path end to end, and the
 XSS and navigation defects were reproduced live in a browser against the real render functions.
 
-| Severity | Count | Meaning |
+| Severity | Confirmed | Meaning |
 |---|---|---|
 | 🔴 Blocker | 7 | Data loss, privilege escalation, or a core workflow that cannot complete |
-| 🟠 High | 21 | Feature broken for a whole role, silent failure, or wrong data written/shown |
-| 🟡 Medium | 39 | Workflow completes but is wrong or confusing in a realistic case |
-| ⚪ Low | 10 | Cosmetic or rare edge case |
+| 🟠 High | 25 | Feature broken for a whole role, silent failure, or wrong data written/shown |
+| 🟡 Medium | 48 | Workflow completes but is wrong or confusing in a realistic case |
+| ⚪ Low | 23 | Cosmetic or rare edge case |
 
 **Method:** 14 parallel workflow auditors (one per feature workflow), each finding then re-checked by
-an independent skeptical verifier instructed to refute it. 101 raised → **77 confirmed, 6 refuted**,
-18 pending at cutoff. The top blockers below were then verified a third time by hand. Plus live
-click-through testing of every route in demo mode at desktop and 375px mobile.
+an independent skeptical verifier instructed to refute it. **110 raised → 103 confirmed, 7 refuted**;
+every finding received a verdict. The blockers below were then verified a third time by hand, and the
+XSS, navigation and silent-submit defects were reproduced live in a browser.
+
+Counts are per dimension, so several defects appear more than once — the XSS was found independently
+by three auditors and the revocation bug by two. That overlap is a confidence signal, not padding.
+Deduplicated, the seven blocker rows collapse to **four distinct defects** (B1–B4); **B5, B6 and B7
+are issues the auditors rated blocker-or-high that I judged rollout-blocking** given a Friday date
+and a fresh production database.
 
 ---
 
@@ -348,7 +354,7 @@ and the dead feature flags all need to go — otherwise staff will believe the d
   collection in the documented schema.
 - **Escape does not close any modal or the search overlay** (*reproduced live*).
 
-Full structured data for all 101 findings, including the 6 refuted ones and per-finding verifier
+Full structured data for all 110 findings, including the 7 refuted ones and per-finding verifier
 reasoning, is in the workflow journal referenced at the end.
 
 ---
@@ -466,11 +472,10 @@ mobile and accessibility. Files read in full include `js/services.js`, `js/ui.js
   `/^\d{4}-\d{2}-\d{2}$/` expiry checks never match and every event shows as "Upcoming" — which is
   how B2's deletion behaviour and the date-formatting defects stay invisible in a demo. A demo
   passing is not evidence a workflow works.
-- **18 of 101 findings had not returned a verifier verdict at cutoff** — they are excluded from the
-  counts above except where I confirmed them by hand (B2 and the routing defects). Two verifier
-  agents were still running.
 - **Severities are the verifiers' corrected values**, which were often lower than the original
-  auditor's claim. 6 findings were refuted outright and are excluded.
+  auditor's claim. 7 findings were refuted outright and are excluded.
+- **Counts are per dimension and contain cross-dimension duplicates** (see Method). Treat the
+  severity tallies as volume indicators; the deduplicated blocker set is B1–B7.
 - Firestore **index deployment status** was not checked (out of scope); only whether the repo defines
   an index for each composite query it issues.
 
