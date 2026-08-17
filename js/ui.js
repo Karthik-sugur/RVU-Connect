@@ -1,6 +1,6 @@
-import { icon, multiSelectField, selectField, inputField, clubInputField, clubSelectField, clubTextArea, unique, escapeHtml, modalSelectField } from './utils.js';
+import { icon, multiSelectField, selectField, inputField, clubInputField, clubSelectField, clubTextArea, unique, escapeHtml, safeUrl, modalSelectField, formatRelativeTime, formatEventDate, eventDateParts, toDate } from './utils.js';
 import { schools, interests, events, clubs, announcements, projects, state, app } from './state.js';
-import { isClubCore, isSchoolRep, isSuperAdmin, canHost, canManageClub, canManageEvent, canManageAnnouncement, isFollowingClub, isItemSaved, platformSettings, roleLabel, activeClub } from './auth.js';
+import { isClubCore, isSchoolRep, isSuperAdmin, canHost, canManageClub, canManageEvent, canManageAnnouncement, isFollowingClub, isItemSaved, platformSettings, roleLabel, activeClub, bySoonest } from './auth.js';
 import { bindEvents } from './main.js';
 import { renderAdminConsole } from './render-admin.js';
 
@@ -8,14 +8,59 @@ export function render() {
   try {
     app.innerHTML = state.authed ? renderAppShell() : renderLanding();
     bindEvents();
+    focusOpenDialog();
   } catch (err) {
     console.error("Render Error:", err);
     app.innerHTML = `<div style="padding:40px; text-align:center;">
       <h2 style="color:#d93025; font-family:inherit;">Something went wrong</h2>
-      <p style="color:#666; font-family:inherit;">${err.message}</p>
+      <p style="color:#666; font-family:inherit;">${escapeHtml(err.message)}</p>
       <button onclick="window.location.reload()" style="padding:10px 20px; background:#d4af37; border:none; border-radius:4px; margin-top:20px; cursor:pointer; color:#1d1a16; font-weight:600;">Reload App</button>
     </div>`;
   }
+}
+
+// `var` on purpose: this module is in an import cycle and render() runs during it, so
+// focusOpenDialog() can execute before the module body finishes. `let`/`const` would throw
+// "Cannot access '…' before initialization" and break the whole render. Do not change.
+var FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+var _trapHandler = null;
+
+/** Move focus into the open dialog and trap Tab inside it. Re-run after every render. */
+export function focusOpenDialog() {
+  if (_trapHandler) {
+    document.removeEventListener("keydown", _trapHandler, true);
+    _trapHandler = null;
+  }
+  const dialogs = app.querySelectorAll('[role="dialog"],[role="alertdialog"]');
+  const dialog = dialogs[dialogs.length - 1];
+  if (!dialog) return;
+
+  const focusable = () => [...dialog.querySelectorAll(FOCUSABLE)].filter((el) => el.offsetParent !== null);
+  const targets = focusable();
+  // Prefer the first field over the close button so typing starts where the user expects.
+  const preferred = targets.find((el) => /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) || targets[0];
+  if (preferred && !dialog.contains(document.activeElement)) preferred.focus();
+
+  _trapHandler = (e) => {
+    if (e.key !== "Tab") return;
+    const items = focusable();
+    if (!items.length) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    if (!dialog.contains(document.activeElement)) {
+      e.preventDefault();
+      first.focus();
+      return;
+    }
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  };
+  document.addEventListener("keydown", _trapHandler, true);
 }
 
 export function renderAtTop() {
@@ -32,18 +77,18 @@ export function renderCreateEventModal() {
   const otherClubs = clubs.filter(c => c.id !== (myClub?.id || ""));
 
   return `
-    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px 0 80px;">
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px 0 80px;" role="dialog" aria-modal="true">
       <div style="background:#f5f2ec;width:100%;max-width:600px;margin:0 16px;">
 
         <div style="padding:24px 24px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1.5px solid #d8cfc4;">
           <h2 style="font-size:18px;font-weight:800;color:#1a1a1a;margin:0;font-family:inherit;text-transform:uppercase;letter-spacing:0.03em;">New Event</h2>
-          <button style="background:none;border:none;font-size:20px;color:#8a7a6a;cursor:pointer;" data-action="close-create-event">×</button>
+          <button style="background:none;border:none;font-size:20px;color:#756552;cursor:pointer;" data-action="close-create-event">×</button>
         </div>
 
         <div style="padding:24px;">
           ${both ? `
           <div style="margin-bottom:20px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Post as *</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Post as *</label>
             <div style="display:flex;gap:12px;">
               <button type="button" class="btn ${hostMode === "club" ? "gold" : "secondary"}" data-action="set-create-host-mode" data-mode="club">Club core</button>
               <button type="button" class="btn ${hostMode === "school" ? "gold" : "secondary"}" data-action="set-create-host-mode" data-mode="school">School rep</button>
@@ -65,51 +110,51 @@ export function renderCreateEventModal() {
           ${asSchool ? modalSelectField("ce-host-school", "School *", schools, state.host.school || state.user.school) : ""}
 
           <div style="margin-bottom:20px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Event Title *</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Event Title *</label>
             <input id="ce-title" type="text" placeholder="What's the event called?" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
           </div>
 
           <div style="margin-bottom:20px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Description *</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Description *</label>
             <textarea id="ce-description" placeholder="What will happen at this event?" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;resize:vertical;min-height:80px;"></textarea>
           </div>
 
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px;">
             <div>
-              <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Date *</label>
+              <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Date *</label>
               <input id="ce-date" type="date" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
             </div>
             <div>
-              <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Time *</label>
+              <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Time *</label>
               <input id="ce-time" type="time" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
             </div>
           </div>
 
           <div style="margin-bottom:20px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Location *</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Location *</label>
             <input id="ce-location" type="text" placeholder="Block A Seminar Hall, Auditorium, Online..." style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
           </div>
 
           <div style="margin-bottom:20px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Registration / External Link *</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Registration / External Link *</label>
             <input id="ce-link" type="url" placeholder="https://forms.google.com/..." style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
           </div>
 
           <div style="margin-bottom:20px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Registration closes (display only)</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Registration closes (display only)</label>
             <input id="ce-reg-deadline" type="datetime-local" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
-            <p style="font-size:10px;color:#8a7a6a;margin:6px 0 0;font-family:inherit;">Shown as a reminder that the Google Form / Luma link may close soon. It does not auto-close the form.</p>
+            <p style="font-size:10px;color:#756552;margin:6px 0 0;font-family:inherit;">Shown as a reminder that the Google Form / Luma link may close soon. It does not auto-close the form.</p>
           </div>
 
           <div style="margin-bottom:20px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Event Poster Image URL (optional)</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Event Poster Image URL (optional)</label>
             <input id="ce-poster" type="url" placeholder="Paste a hosted image URL" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
-            <p style="font-size:10px;color:#8a7a6a;margin:6px 0 0;font-family:inherit;">Upload your image to imgur.com or any image host and paste the link here.</p>
+            <p style="font-size:10px;color:#756552;margin:6px 0 0;font-family:inherit;">Upload your image to imgur.com or any image host and paste the link here.</p>
           </div>
 
           ${isClubCore() && otherClubs.length && (isClubCore() && isSchoolRep() ? (state._createHostMode || "club") === "club" : true) ? `
           <div style="margin-bottom:20px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Collaborating Clubs (optional)</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Collaborating Clubs (optional)</label>
             <select id="ce-collab" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;">
               <option value="">None</option>
               ${otherClubs.map(c => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join("")}
@@ -130,46 +175,46 @@ export function renderCreateEventModal() {
 export function renderEditEventModal() {
   const event = events.find(e => e.id === state.editEventId) || {};
   return `
-    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px 0 80px;">
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px 0 80px;" role="dialog" aria-modal="true">
       <div style="background:#f5f2ec;width:100%;max-width:600px;margin:0 16px;">
         <div style="padding:24px 24px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1.5px solid #d8cfc4;">
           <h2 style="font-size:16px;font-weight:800;color:#1a1a1a;margin:0;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;">Edit Event</h2>
-          <button style="background:none;border:none;font-size:20px;color:#8a7a6a;cursor:pointer;" data-action="close-edit-event">×</button>
+          <button style="background:none;border:none;font-size:20px;color:#756552;cursor:pointer;" data-action="close-edit-event">×</button>
         </div>
         <div style="padding:24px;">
           <div style="margin-bottom:16px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Title</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Title</label>
             <input id="ee-title" type="text" value="${escapeHtml(event.title || "")}" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
           </div>
           <div style="margin-bottom:16px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Description</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Description</label>
             <textarea id="ee-description" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;resize:vertical;min-height:80px;">${escapeHtml(event.description || "")}</textarea>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px;">
             <div>
-              <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Date</label>
+              <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Date</label>
               <input id="ee-date" type="date" value="${escapeHtml(event.date || "")}" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
             </div>
             <div>
-              <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Time</label>
+              <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Time</label>
               <input id="ee-time" type="time" value="${escapeHtml(event.time || "")}" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
             </div>
           </div>
           <div style="margin-bottom:16px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Location</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Location</label>
             <input id="ee-location" type="text" value="${escapeHtml(event.location || "")}" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
           </div>
           <div style="margin-bottom:16px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">External Link</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">External Link</label>
             <input id="ee-link" type="url" value="${escapeHtml(event.link || "")}" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
           </div>
           <div style="margin-bottom:16px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Registration closes (display only)</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Registration closes (display only)</label>
             <input id="ee-reg-deadline" type="datetime-local" value="${escapeHtml((event.registrationDeadline || "").replace(" ", "T").slice(0, 16))}" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
-            <p style="font-size:10px;color:#8a7a6a;margin:6px 0 0;font-family:inherit;">Reminder only — does not auto-close the form.</p>
+            <p style="font-size:10px;color:#756552;margin:6px 0 0;font-family:inherit;">Reminder only — does not auto-close the form.</p>
           </div>
           <div style="margin-bottom:24px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Poster Image URL (optional)</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Poster Image URL (optional)</label>
             <input id="ee-poster" type="url" value="${escapeHtml(event.posterUrl || "")}" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
           </div>
           <div style="display:flex;gap:10px;">
@@ -184,18 +229,18 @@ export function renderEditEventModal() {
 
 export function renderCreateAnnouncementModal() {
   return `
-    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px 0 80px;">
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px 0 80px;" role="dialog" aria-modal="true">
       <div style="background:#f5f2ec;width:100%;max-width:600px;margin:0 16px;">
 
         <div style="padding:24px 24px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1.5px solid #d8cfc4;">
           <h2 style="font-size:18px;font-weight:800;color:#1a1a1a;margin:0;font-family:inherit;text-transform:uppercase;letter-spacing:0.03em;">New Announcement</h2>
-          <button style="background:none;border:none;font-size:20px;color:#8a7a6a;cursor:pointer;" data-action="close-create-announcement">×</button>
+          <button style="background:none;border:none;font-size:20px;color:#756552;cursor:pointer;" data-action="close-create-announcement">×</button>
         </div>
 
         <div style="padding:24px;">
 
           <div style="margin-bottom:20px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Type *</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Type *</label>
             <div style="display:flex;gap:8px;flex-wrap:wrap;">
               ${platformSettings().announcementTags.map((t) => `
                 <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;font-family:inherit;color:#1a1a1a;">
@@ -207,7 +252,7 @@ export function renderCreateAnnouncementModal() {
 
           ${isClubCore() && isSchoolRep() ? `
           <div style="margin-bottom:20px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Post as *</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Post as *</label>
             <div style="display:flex;gap:12px;">
               <button type="button" class="btn ${(state._createHostMode || "club") === "club" ? "gold" : "secondary"}" data-action="set-create-host-mode" data-mode="club">Club core</button>
               <button type="button" class="btn ${(state._createHostMode || "club") === "school" ? "gold" : "secondary"}" data-action="set-create-host-mode" data-mode="school">School rep</button>
@@ -224,24 +269,24 @@ export function renderCreateAnnouncementModal() {
             : ""}
 
           <div style="margin-bottom:20px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Title *</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Title *</label>
             <input id="ca-title" type="text" placeholder="What's the announcement?" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
           </div>
 
           <div style="margin-bottom:20px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Description *</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Description *</label>
             <textarea id="ca-description" placeholder="Full details of the announcement..." style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;resize:vertical;min-height:100px;"></textarea>
           </div>
 
           <div style="margin-bottom:24px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">External Link (optional)</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">External Link (optional)</label>
             <input id="ca-link" type="url" placeholder="https://..." style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
           </div>
 
           <div style="margin-bottom:24px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Image URL (optional)</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Image URL (optional)</label>
             <input id="ca-image" type="url" placeholder="Paste a hosted image URL (imgur, etc.)" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
-            <p style="font-size:10px;color:#8a7a6a;margin:6px 0 0;font-family:inherit;">// TODO: replace with Firebase Storage upload when configured</p>
+            <p style="font-size:10px;color:#756552;margin:6px 0 0;font-family:inherit;">// TODO: replace with Firebase Storage upload when configured</p>
           </div>
 
           <div style="display:flex;gap:10px;">
@@ -342,11 +387,9 @@ export function renderAppShell() {
       </header>
       ${renderTicker()}
       ${state.isDemoMode ? `
-        <div style="background:#1a1a1a;border-bottom:1.5px solid #D7AC54;padding:8px 20px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:56px;z-index:90;">
-          <p style="font-size:12px;font-weight:600;color:#D7AC54;margin:0;font-family:inherit;text-transform:uppercase;letter-spacing:0.08em;">
-            ⚠ Demo Mode — No data is being saved. Sign in with your Google account to access your account.
-          </p>
-          <button style="background:#D7AC54;color:#1a1a1a;border:none;padding:4px 14px;font-size:11px;font-weight:800;font-family:inherit;letter-spacing:0.05em;text-transform:uppercase;cursor:pointer;" data-action="open-login">Sign In</button>
+        <div class="demo-banner" role="status">
+          <p>⚠ Demo Mode — nothing is saved. Sign in with your RVU Google account to use your own.</p>
+          <button data-action="open-login">Sign In</button>
         </div>` : ""}
       <main class="main">
         ${renderRoute()}
@@ -361,6 +404,7 @@ export function renderAppShell() {
       ${state.createAnnouncementOpen ? renderCreateAnnouncementModal() : ""}
       ${state.editAnnouncementOpen ? renderEditAnnouncementModal() : ""}
       ${state.searchOpen ? renderSearchOverlay() : ""}
+      ${state.loginOpen ? renderAuthModal() : ""}
     </div>
   `;
 }
@@ -420,38 +464,38 @@ export function renderSearchResultsHtml() {
 
   const resultGroup = (label, items, renderFn) => items.length ? `
     <div style="margin-bottom:24px;">
-      <p style="font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin:0 0 10px;font-family:inherit;">${label}</p>
+      <p style="font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin:0 0 10px;font-family:inherit;">${label}</p>
       ${items.map(renderFn).join("")}
     </div>` : "";
 
   const eventResult = e => `
     <div style="padding:12px 0;border-bottom:1px solid #e8e0d4;cursor:pointer;" data-action="search-open-event" data-docid="${e.id}">
       <p style="font-size:14px;font-weight:700;color:#1a1a1a;margin:0 0 2px;font-family:inherit;">${escapeHtml(e.title)}</p>
-      <p style="font-size:12px;color:#8a7a6a;margin:0;font-family:inherit;">${escapeHtml(e.date || "")} · ${escapeHtml(e.host || e.club || "")}</p>
+      <p style="font-size:12px;color:#756552;margin:0;font-family:inherit;">${escapeHtml(e.date || "")} · ${escapeHtml(e.host || e.club || "")}</p>
     </div>`;
 
   const clubResult = c => `
     <div style="padding:12px 0;border-bottom:1px solid #e8e0d4;cursor:pointer;" data-action="search-open-club" data-slug="${c.slug || c.id}">
       <p style="font-size:14px;font-weight:700;color:#1a1a1a;margin:0 0 2px;font-family:inherit;">${escapeHtml(c.name)}</p>
-      <p style="font-size:12px;color:#8a7a6a;margin:0;font-family:inherit;">${escapeHtml(c.category || "")} · ${escapeHtml(c.school || "")}</p>
+      <p style="font-size:12px;color:#756552;margin:0;font-family:inherit;">${escapeHtml(c.category || "")} · ${escapeHtml(c.school || "")}</p>
     </div>`;
 
   const projectResult = p => `
     <div style="padding:12px 0;border-bottom:1px solid #e8e0d4;cursor:pointer;" data-action="search-open-project" data-docid="${p.id}">
       <p style="font-size:14px;font-weight:700;color:#1a1a1a;margin:0 0 2px;font-family:inherit;">${escapeHtml(p.title)}</p>
-      <p style="font-size:12px;color:#8a7a6a;margin:0;font-family:inherit;">${escapeHtml((p.tags || []).join(", "))} · ${p.status === "open" ? "Open" : "Closed"}</p>
+      <p style="font-size:12px;color:#756552;margin:0;font-family:inherit;">${escapeHtml((p.tags || []).join(", "))} · ${p.status === "open" ? "Open" : "Closed"}</p>
     </div>`;
 
   const announcementResult = a => `
     <div style="padding:12px 0;border-bottom:1px solid #e8e0d4;cursor:pointer;" data-action="search-open-announcement" data-docid="${a.id}">
       <p style="font-size:14px;font-weight:700;color:#1a1a1a;margin:0 0 2px;font-family:inherit;">${escapeHtml(a.title)}</p>
-      <p style="font-size:12px;color:#8a7a6a;margin:0;font-family:inherit;">${escapeHtml(a.source || "")} · ${escapeHtml(a.tag || "")}</p>
+      <p style="font-size:12px;color:#756552;margin:0;font-family:inherit;">${escapeHtml(a.source || "")} · ${escapeHtml(a.tag || "")}</p>
     </div>`;
 
   return !hasQuery ? `
-    <p style="font-size:13px;color:#8a7a6a;font-family:inherit;text-align:center;margin-top:40px;">Start typing to search across RVU Connect</p>
+    <p style="font-size:13px;color:#756552;font-family:inherit;text-align:center;margin-top:40px;">Start typing to search across RVU Connect</p>
   ` : total === 0 ? `
-    <p style="font-size:13px;color:#8a7a6a;font-family:inherit;text-align:center;margin-top:40px;">No results for "${escapeHtml(state.searchQuery)}"</p>
+    <p style="font-size:13px;color:#756552;font-family:inherit;text-align:center;margin-top:40px;">No results for "${escapeHtml(state.searchQuery)}"</p>
   ` : `
     ${resultGroup("Events", matchedEvents, eventResult)}
     ${resultGroup("Clubs", matchedClubs, clubResult)}
@@ -462,10 +506,10 @@ export function renderSearchResultsHtml() {
 
 export function renderSearchOverlay() {
   return `
-    <div style="position:fixed;inset:0;background:#f5f2ec;z-index:200;display:flex;flex-direction:column;">
+    <div style="position:fixed;inset:0;background:#f5f2ec;z-index:200;display:flex;flex-direction:column;" role="dialog" aria-modal="true">
 
       <div style="padding:16px 20px;border-bottom:1.5px solid #d8cfc4;display:flex;align-items:center;gap:12px;">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8a7a6a" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#756552" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
         <input
           id="search-input"
           type="text"
@@ -475,7 +519,7 @@ export function renderSearchOverlay() {
           data-action="search-input"
           autofocus
         />
-        <button style="background:none;border:none;font-size:13px;font-weight:700;color:#8a7a6a;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;" data-action="close-search">Close</button>
+        <button style="background:none;border:1.5px solid #c8b89a;min-width:44px;min-height:44px;padding:10px 16px;font-size:13px;font-weight:700;color:#5a4a3a;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;flex-shrink:0;" data-action="close-search" aria-label="Close search">Close</button>
       </div>
 
       <div id="search-results-container" style="flex:1;overflow-y:auto;padding:20px;">
@@ -513,8 +557,8 @@ export function navButtons(withIcons) {
   if (isSuperAdmin()) {
     pendingCount = state.hostRequests.filter(r => r.status === "pending").length;
   } else if (isClubCore() && state.host.approved) {
-    const activeClubIds = (state.host.clubAccesses || []).map(a => a.club.id || a.club.slug);
-    pendingCount = state.hostRequests.filter(r => r.type === "clubCore" && r.status === "pending" && activeClubIds.includes(r.clubId)).length;
+    // Membership applications live in clubApplications; a club core cannot read others' hostRequests.
+    pendingCount = (state.clubApplicants || []).filter(a => (a.status || "pending") === "pending").length;
   }
   const badge = pendingCount > 0 ? `<span style="background:#e44;color:#fff;border-radius:50%;padding:2px 6px;font-size:10px;margin-left:6px;font-weight:bold;">${pendingCount}</span>` : "";
 
@@ -574,6 +618,21 @@ export function renderLoadingState() {
         100% { opacity: 0.6; }
       }
     </style>
+  `;
+}
+
+/**
+ * Not-found state for a deep link whose target is gone or not loaded.
+ * `backAction` is a data-action that returns to the relevant list.
+ */
+export function renderNotFound(title, copy, backAction, backLabel) {
+  return `
+    <div style="max-width:560px;margin:0 auto;padding:64px 20px 100px;text-align:center;">
+      <p style="font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#756552;margin:0 0 12px;font-family:inherit;">Not found</p>
+      <h1 style="font-size:24px;font-weight:900;color:#1a1a1a;margin:0 0 12px;font-family:inherit;line-height:1.2;">${escapeHtml(title)}</h1>
+      <p style="font-size:15px;color:#5a4a3a;line-height:1.7;font-family:inherit;margin:0 0 24px;">${escapeHtml(copy)}</p>
+      <button style="background:#D7AC54;color:#1a1a1a;border:none;padding:12px 24px;min-height:44px;font-size:12px;font-weight:800;font-family:inherit;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;" data-action="${escapeHtml(backAction)}">← ${escapeHtml(backLabel)}</button>
+    </div>
   `;
 }
 
@@ -646,9 +705,8 @@ export function renderHome() {
           <div class="section-title"><h2>My Campus</h2><span>Saved and applied</span></div>
           <div class="updates">
             ${state.followedClubs.slice(0, 2).map((item) => `<article class="update-item"><h3>${escapeHtml(item.clubName || "Followed club")}</h3><p>Club followed for personalized updates.</p></article>`).join("")}
-            ${state.rsvps.slice(0, 2).map((item) => `<article class="update-item"><h3>${escapeHtml(item.title || "RSVP")}</h3><p>${escapeHtml(item.status || "going")} RSVP stored.</p></article>`).join("")}
-            ${state.myApplications.slice(0, 2).map((item) => `<article class="update-item"><h3>${escapeHtml(item.title || "Project application")}</h3><p>Status: ${escapeHtml(item.status || "pending")}</p></article>`).join("")}
-            ${!state.followedClubs.length && !state.rsvps.length && !state.myApplications.length ? renderEmptyState("No personal activity yet", "Follow clubs, RSVP to events, save content, or apply to projects.") : ""}
+            ${state.savedItems.slice(0, 2).map((item) => `<article class="update-item"><h3>${escapeHtml(item.title || "Saved item")}</h3><p>Saved for later.</p></article>`).join("")}
+            ${!state.followedClubs.length && !state.savedItems.length ? renderEmptyState("No personal activity yet", "Follow clubs and save events, projects or updates to see them here.") : ""}
           </div>
         </section>
       </aside>
@@ -681,11 +739,27 @@ export function renderEvents() {
   `;
 }
 
+/**
+ * True when two events share a host. Match on clubId/schoolId, never on a display name or an
+ * absent field — `undefined === undefined` would make every school event match every other.
+ */
+export function sameHost(a, b) {
+  if (!a || !b) return false;
+  if (b.hostType === "club" || b.clubId) {
+    return Boolean(b.clubId) && (a.clubId === b.clubId);
+  }
+  if (b.hostType === "school" || b.schoolId) {
+    return Boolean(b.schoolId) && (a.schoolId === b.schoolId);
+  }
+  // Legacy events with neither id — fall back to the display name, but require it to exist.
+  return Boolean(b.host) && a.host === b.host;
+}
+
 export function renderEventDetail() {
   const event = events.find(e => e.id === state.selectedEventId);
   if (!event) {
-    state.selectedEventId = null;
-    return renderEvents();
+
+    return renderNotFound("Event not found", "This event may have ended, been removed, or is no longer listed.", "close-event-detail", "All events");
   }
 
   const isPast = event.past === true;
@@ -697,22 +771,22 @@ export function renderEventDetail() {
       <button style="
         display:inline-flex;align-items:center;gap:6px;
         background:none;border:none;
-        font-size:12px;font-weight:700;color:#8a7a6a;
+        font-size:12px;font-weight:700;color:#756552;
         font-family:inherit;text-transform:uppercase;letter-spacing:0.08em;
         cursor:pointer;padding:20px 20px 16px;
       " data-action="close-event-detail">← All Events</button>
 
       ${event.posterUrl ? `
         <div style="width:100%;height:260px;overflow:hidden;margin-bottom:0;">
-          <img src="${escapeHtml(event.posterUrl)}" style="width:100%;height:100%;object-fit:cover;" alt="${escapeHtml(event.title)}" />
+          <img src="${safeUrl(event.posterUrl)}" style="width:100%;height:100%;object-fit:cover;" alt="${escapeHtml(event.title)}" />
         </div>` : ""}
 
       <div style="padding:24px 20px;">
 
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
-          <span style="font-size:10px;font-weight:700;color:#8a7a6a;font-family:inherit;text-transform:uppercase;letter-spacing:0.1em;border:1.5px solid #c8b89a;padding:3px 10px;">${escapeHtml(event.type || "Event")}</span>
+          <span style="font-size:10px;font-weight:700;color:#756552;font-family:inherit;text-transform:uppercase;letter-spacing:0.1em;border:1.5px solid #c8b89a;padding:3px 10px;">${escapeHtml(event.type || "Event")}</span>
           ${isCancelled ? `<span style="font-size:10px;font-weight:700;color:#dc2626;font-family:inherit;text-transform:uppercase;letter-spacing:0.1em;background:#fee2e2;padding:3px 10px;">CANCELLED</span>` : ""}
-          ${isPast ? `<span style="font-size:10px;font-weight:700;color:#8a7a6a;font-family:inherit;text-transform:uppercase;letter-spacing:0.1em;padding:3px 10px;">PAST</span>` : ""}
+          ${isPast ? `<span style="font-size:10px;font-weight:700;color:#756552;font-family:inherit;text-transform:uppercase;letter-spacing:0.1em;padding:3px 10px;">PAST</span>` : ""}
         </div>
 
         <h1 style="font-size:28px;font-weight:900;color:#1a1a1a;margin:0 0 8px;font-family:inherit;line-height:1.1;">${escapeHtml(event.title || "")}</h1>
@@ -720,20 +794,20 @@ export function renderEventDetail() {
         <p style="font-size:13px;font-weight:700;color:#D7AC54;margin:0 0 20px;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;">${escapeHtml(event.host || event.club || "")}</p>
 
         ${(event.collaboratingClubs || []).length ? `
-          <p style="font-size:12px;color:#8a7a6a;margin:-14px 0 20px;font-family:inherit;">with ${event.collaboratingClubs.map(c => escapeHtml(c)).join(", ")}</p>` : ""}
+          <p style="font-size:12px;color:#756552;margin:-14px 0 20px;font-family:inherit;">with ${event.collaboratingClubs.map(c => escapeHtml(c)).join(", ")}</p>` : ""}
 
         <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:24px;padding:16px;background:#f0ece4;border-left:3px solid #D7AC54;">
           <div style="display:flex;align-items:center;gap:10px;">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8a7a6a" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></svg>
-            <span style="font-size:13px;color:#1a1a1a;font-family:inherit;font-weight:600;">${escapeHtml(event.date || "")} ${escapeHtml(event.time || "")}</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#756552" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></svg>
+            <span style="font-size:13px;color:#1a1a1a;font-family:inherit;font-weight:600;">${escapeHtml(formatEventDate(event.date))}${event.time ? ` · ${escapeHtml(event.time)}` : ""}</span>
           </div>
           <div style="display:flex;align-items:center;gap:10px;">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8a7a6a" stroke-width="2"><path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#756552" stroke-width="2"><path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
             <span style="font-size:13px;color:#1a1a1a;font-family:inherit;">${escapeHtml(event.location || "")}</span>
           </div>
           ${event.registrationDeadline ? `
           <div style="display:flex;align-items:center;gap:10px;">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8a7a6a" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#756552" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
             <span style="font-size:13px;color:#1a1a1a;font-family:inherit;">Registration reminder: ${escapeHtml(event.registrationDeadline)}</span>
           </div>` : ""}
         </div>
@@ -744,26 +818,27 @@ export function renderEventDetail() {
 
         ${!isPast && !isCancelled ? `
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:24px;">
-            ${event.link ? `<a href="${escapeHtml(event.link)}" target="_blank" rel="noopener" style="background:#D7AC54;color:#1a1a1a;border:none;padding:12px 24px;font-size:12px;font-weight:800;font-family:inherit;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:6px;">Join →</a>` : ""}
+            ${safeUrl(event.link) ? `<a href="${safeUrl(event.link)}" target="_blank" rel="noopener" style="background:#D7AC54;color:#1a1a1a;border:none;padding:12px 24px;min-height:44px;font-size:12px;font-weight:800;font-family:inherit;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:6px;">Join →</a>` : ""}
             <button style="background:none;border:1.5px solid #c8b89a;color:#5a4a3a;padding:12px 18px;font-size:12px;font-weight:700;font-family:inherit;letter-spacing:0.05em;text-transform:uppercase;cursor:pointer;" data-action="${isItemSaved(event.id, "event") ? "unsave-item" : "save-item"}" data-docid="${event.id}" data-kind="event" data-title="${escapeHtml(event.title)}">${isItemSaved(event.id, "event") ? "Saved" : "Save"}</button>
             ${canManageEvent(event) ? `
               <button style="background:none;border:1.5px solid #c8b89a;color:#5a4a3a;padding:12px 18px;font-size:12px;font-weight:700;font-family:inherit;letter-spacing:0.05em;text-transform:uppercase;cursor:pointer;" data-action="open-edit-event" data-docid="${event.id}">Edit</button>
-              <button style="background:none;border:1.5px solid #c8b89a;color:#a09080;padding:12px 18px;font-size:12px;font-weight:700;font-family:inherit;letter-spacing:0.05em;text-transform:uppercase;cursor:pointer;" data-action="${event.hostType === "school" ? "delete-school-event" : "delete-club-event"}" data-docid="${event.id}">Delete</button>
+              <button style="background:none;border:1.5px solid #c8b89a;color:#6a5a4a;padding:12px 18px;font-size:12px;font-weight:700;font-family:inherit;letter-spacing:0.05em;text-transform:uppercase;cursor:pointer;" data-action="${event.hostType === "school" ? "delete-school-event" : "delete-club-event"}" data-docid="${event.id}">Delete</button>
             ` : ""}
           </div>` : ""}
 
         <div style="height:1px;background:#d8cfc4;margin-bottom:20px;"></div>
 
         <div>
-          <p style="font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin:0 0 14px;font-family:inherit;">More from ${escapeHtml(event.host || event.club || "this host")}</p>
+          <p style="font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin:0 0 14px;font-family:inherit;">More from ${escapeHtml(event.host || event.club || "this host")}</p>
           ${events
-      .filter(e => (e.host === event.host || e.club === event.club) && e.id !== event.id && !e.past)
+      .filter(e => e.id !== event.id && !e.past && sameHost(e, event))
+      .sort(bySoonest)
       .slice(0, 2)
       .map(e => `
               <div style="padding:12px 0;border-bottom:1px solid #e8e0d4;cursor:pointer;" data-action="open-event-detail" data-docid="${e.id}">
                 <p style="font-size:13px;font-weight:700;color:#1a1a1a;margin:0 0 3px;font-family:inherit;">${escapeHtml(e.title)}</p>
-                <p style="font-size:12px;color:#8a7a6a;margin:0;font-family:inherit;">${escapeHtml(e.date || "")} · ${escapeHtml(e.location || "")}</p>
-              </div>`).join("") || `<p style="font-size:13px;color:#8a7a6a;font-family:inherit;">No other events from this host.</p>`}
+                <p style="font-size:12px;color:#756552;margin:0;font-family:inherit;">${escapeHtml(e.date || "")} · ${escapeHtml(e.location || "")}</p>
+              </div>`).join("") || `<p style="font-size:13px;color:#756552;font-family:inherit;">No other events from this host.</p>`}
         </div>
 
       </div>
@@ -793,8 +868,11 @@ export function renderClubs() {
 }
 
 export function renderClubDetail() {
-  const club = clubs.find((item) => item.slug === state.selectedClubSlug) || clubs[0];
-  if (!club) return renderClubs();
+  // Never fall back to clubs[0] — that renders a different club as if it were the requested one.
+  const club = clubs.find((item) => item.slug === state.selectedClubSlug || item.id === state.selectedClubSlug);
+  if (!club) {
+    return renderNotFound("Club not found", "This club may have been removed, or is not approved for listing yet.", "back-to-clubs", "All clubs");
+  }
   const clubEvents = events.filter((event) => event.club === club.name || event.host === club.name || event.clubId === club.id || event.clubId === club.slug);
   const joinHref = club.join || club.joinLink || "";
   const canEdit = canManageClub(club);
@@ -857,7 +935,7 @@ export function renderClubDetail() {
         <span>${state._clubCoreMembersLoading ? "Loading…" : `${coreMembers.length} member${coreMembers.length === 1 ? "" : "s"}`}</span>
       </div>
       ${state._clubCoreMembersLoading
-        ? `<p style="font-size:13px;color:#8a7a6a;">Loading core members…</p>`
+        ? `<p style="font-size:13px;color:#756552;">Loading core members…</p>`
         : coreMembers.length
           ? `<div class="admin-board">${coreMembers.map((m) => {
             const email = (m.email || m.id || "").trim().toLowerCase();
@@ -885,34 +963,34 @@ export function renderClubDetail() {
 export function renderEditClubModal(club = {}) {
   const highlightsText = Array.isArray(club.highlights) ? club.highlights.join("\n") : (club.highlights || "");
   return `
-    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px 0 80px;">
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px 0 80px;" role="dialog" aria-modal="true">
       <div style="background:#f5f2ec;width:100%;max-width:600px;margin:0 16px;">
         <div style="padding:24px 24px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1.5px solid #d8cfc4;">
           <h2 style="font-size:16px;font-weight:800;color:#1a1a1a;margin:0;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;">Edit Club Profile</h2>
-          <button style="background:none;border:none;font-size:20px;color:#8a7a6a;cursor:pointer;" data-action="close-edit-club">×</button>
+          <button style="background:none;border:none;font-size:20px;color:#756552;cursor:pointer;" data-action="close-edit-club">×</button>
         </div>
         <div style="padding:24px;">
           <div style="margin-bottom:16px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Tagline</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Tagline</label>
             <input id="ec-tagline" type="text" value="${escapeHtml(club.tagline || "")}" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
           </div>
           <div style="margin-bottom:16px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Description</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Description</label>
             <textarea id="ec-description" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;resize:vertical;min-height:120px;">${escapeHtml(club.description || "")}</textarea>
           </div>
           <div style="margin-bottom:16px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Currently active on</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Currently active on</label>
             <input id="ec-doing" type="text" value="${escapeHtml(club.doing || "")}" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
           </div>
           <div style="margin-bottom:16px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">What they have done (highlights)</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">What they have done (highlights)</label>
             <textarea id="ec-highlights" placeholder="One highlight per line" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;resize:vertical;min-height:100px;">${escapeHtml(highlightsText)}</textarea>
-            <p style="font-size:10px;color:#8a7a6a;margin:6px 0 0;font-family:inherit;">Shown under “What they have done”. One item per line.</p>
+            <p style="font-size:10px;color:#756552;margin:6px 0 0;font-family:inherit;">Shown under “What they have done”. One item per line.</p>
           </div>
           <div style="margin-bottom:20px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Join / registration link</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Join / registration link</label>
             <input id="ec-join" type="url" value="${escapeHtml(club.join || club.joinLink || "")}" placeholder="https://forms.google.com/..." style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
-            <p style="font-size:10px;color:#8a7a6a;margin:6px 0 0;font-family:inherit;">Google Form, Luma, or any signup URL. Required for the Join button when registration is open.</p>
+            <p style="font-size:10px;color:#756552;margin:6px 0 0;font-family:inherit;">Google Form, Luma, or any signup URL. Required for the Join button when registration is open.</p>
           </div>
           <div style="display:flex;gap:10px;">
             <button style="flex:1;background:#D7AC54;color:#1a1a1a;border:none;padding:12px;font-size:12px;font-weight:800;font-family:inherit;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;" data-action="submit-edit-club" data-docid="${club.id || club.slug}">Save changes</button>
@@ -924,27 +1002,50 @@ export function renderEditClubModal(club = {}) {
   `;
 }
 
+/** Map a saved item's type to a real action. Interpolating the type yields dead actions. */
+export function savedItemAction(type) {
+  switch (String(type || "").toLowerCase()) {
+    case "event": return "open-event-detail";
+    case "project": return "open-project-detail";
+    case "announcement": return "open-announcement-detail";
+    case "club": return "open-club";
+    default: return "";
+  }
+}
+
+/**
+ * True when an announcement belongs to a school rather than a club. Must depend on the ITEM,
+ * never the editor's roles, or a dual-role user editing a club announcement rewrites its source.
+ */
+export function isSchoolAnnouncement(item) {
+  if (!item) return false;
+  return item.sourceType === "school"
+    || item.type === "School"
+    || item.type === "Faculty"
+    || Boolean(item.schoolId);
+}
+
 export function renderEditAnnouncementModal() {
   const item = announcements.find(a => a.id === state.editAnnouncementId) || {};
   return `
-    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px 0 80px;">
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px 0 80px;" role="dialog" aria-modal="true">
       <div style="background:#f5f2ec;width:100%;max-width:600px;margin:0 16px;">
         <div style="padding:24px 24px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1.5px solid #d8cfc4;">
           <h2 style="font-size:16px;font-weight:800;color:#1a1a1a;margin:0;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;">Edit Announcement</h2>
-          <button style="background:none;border:none;font-size:20px;color:#8a7a6a;cursor:pointer;" data-action="close-edit-announcement">×</button>
+          <button style="background:none;border:none;font-size:20px;color:#756552;cursor:pointer;" data-action="close-edit-announcement">×</button>
         </div>
         <div style="padding:24px;">
           <div style="margin-bottom:16px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Title</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Title</label>
             <input id="ea-title" type="text" value="${escapeHtml(item.title || "")}" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
           </div>
           <div style="margin-bottom:16px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Description</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Description</label>
             <textarea id="ea-description" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;resize:vertical;min-height:100px;">${escapeHtml(item.description || "")}</textarea>
           </div>
-          ${isSchoolRep() || (item.sourceType === "school" || item.type === "School") ? modalSelectField("ea-host-school", "School", schools, item.schoolId || item.schoolName || item.source || state.host.school) : ""}
+          ${isSchoolAnnouncement(item) ? modalSelectField("ea-host-school", "School", schools, item.schoolId || item.schoolName || item.source || state.host.school) : ""}
           <div style="margin-bottom:16px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Tag</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Tag</label>
             <div style="display:flex;gap:8px;flex-wrap:wrap;">
               ${platformSettings().announcementTags.map((t) => `
                 <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;font-family:inherit;color:#1a1a1a;">
@@ -954,7 +1055,7 @@ export function renderEditAnnouncementModal() {
             </div>
           </div>
           <div style="margin-bottom:24px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Image URL (optional)</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Image URL (optional)</label>
             <input id="ea-image" type="url" value="${escapeHtml(item.imageUrl || "")}" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
           </div>
           <div style="display:flex;gap:10px;">
@@ -969,49 +1070,49 @@ export function renderEditAnnouncementModal() {
 
 export function renderCreateProjectModal() {
   return `
-    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px 0 80px;">
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px 0 80px;" role="dialog" aria-modal="true">
       <div style="background:#f5f2ec;width:100%;max-width:600px;margin:0 16px;">
 
         <div style="padding:24px 24px 0;display:flex;align-items:center;justify-content:space-between;border-bottom:1.5px solid #d8cfc4;padding-bottom:16px;">
           <h2 style="font-size:18px;font-weight:800;color:#1a1a1a;margin:0;font-family:inherit;text-transform:uppercase;letter-spacing:0.03em;">New Project</h2>
-          <button style="background:none;border:none;font-size:20px;color:#8a7a6a;cursor:pointer;font-family:inherit;" data-action="close-create-project">×</button>
+          <button style="background:none;border:none;font-size:20px;color:#756552;cursor:pointer;font-family:inherit;" data-action="close-create-project">×</button>
         </div>
 
         <div style="padding:24px;">
 
           <div style="margin-bottom:20px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Project Title *</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Project Title *</label>
             <input id="cp-title" type="text" placeholder="What are you building?" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
           </div>
 
           <div style="margin-bottom:20px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Description *</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Description *</label>
             <textarea id="cp-description" placeholder="Describe what you're building, what problem it solves, and what kind of collaborators you need." style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;resize:vertical;min-height:100px;"></textarea>
           </div>
 
           <div style="margin-bottom:20px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Skills Required</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Skills Required</label>
             <input id="cp-skills" type="text" placeholder="React, Python, UI Design, Video Editing... (comma separated)" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
           </div>
 
           <div style="margin-bottom:20px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Tags</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Tags</label>
             <input id="cp-tags" type="text" placeholder="AI, Web Dev, Design, Film... (comma separated)" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
           </div>
 
           <div style="margin-bottom:20px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Project Deadline</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Project Deadline</label>
             <input id="cp-expiry" type="date" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
           </div>
 
           <div style="margin-bottom:20px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">External Application Link <span style="font-weight:400;text-transform:none;">(optional)</span></label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">External Application Link <span style="font-weight:400;text-transform:none;">(optional)</span></label>
             <input id="cp-applink" type="url" placeholder="https://forms.google.com/ · Typeform · Notion · Airtable · Any URL" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
-            <p style="font-size:10px;color:#8a7a6a;margin:6px 0 0;font-family:inherit;">When provided, a prominent "Apply / Join Project" button appears on your listing.</p>
+            <p style="font-size:10px;color:#756552;margin:6px 0 0;font-family:inherit;">When provided, a prominent "Apply / Join Project" button appears on your listing.</p>
           </div>
 
           <div style="margin-bottom:24px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Contact Phone (optional)</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Contact Phone (optional)</label>
             <input id="cp-phone" type="tel" placeholder="Visible to logged-in users only" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
           </div>
 
@@ -1052,11 +1153,10 @@ export function renderProjects() {
 export function renderProjectDetail() {
   const project = projects.find(p => p.id === state.selectedProjectId);
   if (!project) {
-    state.selectedProjectId = null;
-    return renderProjects();
+    return renderNotFound("Project not found", "This project may have passed its deadline, been deleted, or is no longer listed.", "close-project-detail", "All projects");
   }
 
-  const isOpen = project.status === "open";
+  const isOpen = String(project.status || "open").toLowerCase() !== "closed";
   const isMyProject = project.postedBy === state.authUser?.email || isSuperAdmin();
   const isLoggedIn = !!state.authUser;
 
@@ -1065,7 +1165,7 @@ export function renderProjectDetail() {
 
       <button style="
         background:none;border:none;
-        font-size:12px;font-weight:700;color:#8a7a6a;
+        font-size:12px;font-weight:700;color:#756552;
         font-family:inherit;text-transform:uppercase;letter-spacing:0.08em;
         cursor:pointer;padding:20px 20px 16px;display:inline-flex;align-items:center;gap:6px;
       " data-action="close-project-detail">← All Projects</button>
@@ -1075,11 +1175,11 @@ export function renderProjectDetail() {
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
           <span style="
             font-size:10px;font-weight:800;
-            color:${isOpen ? "#2a7a4a" : "#8a7a6a"};
-            background:${isOpen ? "#2a7a4a18" : "#8a7a6a18"};
-            padding:3px 12px;font-family:inherit;text-transform:uppercase;letter-spacing:0.1em;
+            color:${isOpen ? "#2a7a4a" : "#756552"};
+            background:${isOpen ? "#2a7a4a18" : "#75655218"};
+            padding:8px 12px;min-height:36px;font-family:inherit;text-transform:uppercase;letter-spacing:0.1em;
           ">${isOpen ? "OPEN" : "CLOSED"}</span>
-          ${project.expiry ? `<span style="font-size:12px;color:#8a7a6a;font-family:inherit;">Due ${escapeHtml(project.expiry)}</span>` : ""}
+          ${project.expiry ? `<span style="font-size:12px;color:#756552;font-family:inherit;">Due ${escapeHtml(project.expiry)}</span>` : ""}
         </div>
 
         <h1 style="font-size:26px;font-weight:900;color:#1a1a1a;margin:0 0 20px;font-family:inherit;line-height:1.15;">${escapeHtml(project.title || "")}</h1>
@@ -1090,34 +1190,34 @@ export function renderProjectDetail() {
 
         ${(project.skills || []).length ? `
           <div style="margin-bottom:16px;">
-            <p style="font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin:0 0 10px;font-family:inherit;">Skills Needed</p>
+            <p style="font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin:0 0 10px;font-family:inherit;">Skills Needed</p>
             <div style="display:flex;flex-wrap:wrap;gap:8px;">
-              ${project.skills.map(s => `<span style="border:1.5px solid #c8b89a;padding:4px 12px;font-size:12px;font-weight:600;color:#1a1a1a;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;">${escapeHtml(s)}</span>`).join("")}
+              ${project.skills.map(s => `<span style="border:1.5px solid #c8b89a;padding:8px 12px;min-height:36px;font-size:12px;font-weight:600;color:#1a1a1a;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;">${escapeHtml(s)}</span>`).join("")}
             </div>
           </div>` : ""}
 
         ${(project.tags || []).length ? `
           <div style="margin-bottom:24px;">
-            <p style="font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin:0 0 10px;font-family:inherit;">Tags</p>
+            <p style="font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin:0 0 10px;font-family:inherit;">Tags</p>
             <div style="display:flex;flex-wrap:wrap;gap:8px;">
-              ${project.tags.map(t => `<span style="background:#D7AC5418;color:#8a6a2a;padding:4px 12px;font-size:12px;font-weight:600;font-family:inherit;">${escapeHtml(t)}</span>`).join("")}
+              ${project.tags.map(t => `<span style="background:#D7AC5418;color:#8a6a2a;padding:8px 12px;min-height:36px;font-size:12px;font-weight:600;font-family:inherit;">${escapeHtml(t)}</span>`).join("")}
             </div>
           </div>` : ""}
 
         <div style="background:#f0ece4;border-left:3px solid #D7AC54;padding:16px;margin-bottom:24px;">
-          <p style="font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin:0 0 10px;font-family:inherit;">Posted By</p>
+          <p style="font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin:0 0 10px;font-family:inherit;">Posted By</p>
           <p style="font-size:14px;font-weight:700;color:#1a1a1a;margin:0 0 4px;font-family:inherit;">${escapeHtml(project.postedByName || project.postedBy || "Student")}</p>
           ${isLoggedIn ? `
             <p style="font-size:13px;color:#5a4a3a;margin:0 0 4px;font-family:inherit;">${escapeHtml(project.postedBy || "")}</p>
             ${project.contactPhone ? `<p style="font-size:13px;color:#5a4a3a;margin:0;font-family:inherit;">${escapeHtml(project.contactPhone)}</p>` : ""}
-          ` : `<p style="font-size:12px;color:#8a7a6a;margin:0;font-family:inherit;">Sign in to see contact details.</p>`}
+          ` : `<p style="font-size:12px;color:#756552;margin:0;font-family:inherit;">Sign in to see contact details.</p>`}
           <p style="font-size:12px;color:#5a4a3a;margin:12px 0 0;font-family:inherit;line-height:1.5;">Reach out to this student by email, phone, or their external link for more details about joining the project.</p>
         </div>
 
         ${isOpen ? `
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;">
             ${project.applicationLink ? `
-              <a href="${escapeHtml(project.applicationLink)}" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:6px;background:#D7AC54;color:#1a1a1a;padding:12px 28px;font-size:12px;font-weight:800;font-family:inherit;letter-spacing:0.08em;text-transform:uppercase;text-decoration:none;">Apply / Join Project ↗</a>
+              <a href="${safeUrl(project.applicationLink)}" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:6px;background:#D7AC54;color:#1a1a1a;padding:12px 28px;font-size:12px;font-weight:800;font-family:inherit;letter-spacing:0.08em;text-transform:uppercase;text-decoration:none;">Apply / Join Project ↗</a>
             ` : `
               <div style="background:#f0ece4;border-left:3px solid #D7AC54;padding:12px 16px;flex:1;">
                 <p style="font-size:13px;color:#5a4a3a;margin:0;font-family:inherit;font-weight:600;">Contact the owner directly to collaborate.</p>
@@ -1126,13 +1226,13 @@ export function renderProjectDetail() {
             <button style="background:none;border:1.5px solid #c8b89a;color:#5a4a3a;padding:12px 18px;font-size:12px;font-weight:700;font-family:inherit;letter-spacing:0.05em;text-transform:uppercase;cursor:pointer;" data-action="${isItemSaved(project.id, "project") ? "unsave-item" : "save-item"}" data-docid="${project.id}" data-kind="project" data-title="${escapeHtml(project.title)}">${isItemSaved(project.id, "project") ? "Saved" : "Save"}</button>
           </div>` : `
           <div style="background:#f0ece4;padding:12px 16px;margin-bottom:16px;border-left:3px solid #c8b89a;">
-            <p style="font-size:13px;color:#8a7a6a;margin:0;font-family:inherit;font-weight:600;">This project is no longer accepting collaborators.</p>
+            <p style="font-size:13px;color:#756552;margin:0;font-family:inherit;font-weight:600;">This project is no longer accepting collaborators.</p>
           </div>`}
 
         ${isMyProject ? `
           <div style="display:flex;gap:8px;padding-top:16px;border-top:1px solid #e8e0d4;">
             <button style="background:none;border:1.5px solid #c8b89a;padding:8px 16px;font-size:11px;font-weight:700;color:#5a4a3a;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;" data-action="toggle-project-status" data-docid="${project.id}" data-status="${escapeHtml(project.status)}">${isOpen ? "Close Project" : "Reopen"}</button>
-            <button style="background:none;border:1.5px solid #c8b89a;padding:8px 16px;font-size:11px;font-weight:700;color:#a09080;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;" data-action="delete-own-project" data-docid="${project.id}" data-title="${escapeHtml(project.title)}">Delete</button>
+            <button style="background:none;border:1.5px solid #c8b89a;padding:8px 16px;font-size:11px;font-weight:700;color:#6a5a4a;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;" data-action="delete-own-project" data-docid="${project.id}" data-title="${escapeHtml(project.title)}">Delete</button>
           </div>` : ""}
 
       </div>
@@ -1142,7 +1242,12 @@ export function renderProjectDetail() {
 
 export function renderAnnouncements() {
   if (state.selectedAnnouncementId) return renderAnnouncementDetail();
-  const filtered = announcements.filter((item) => state.filters.announcementType === "All" || item.type === state.filters.announcementType);
+  const tagFilter = state.filters.announcementTag || "All";
+  const filtered = announcements.filter((item) => {
+    const typeOk = state.filters.announcementType === "All" || item.type === state.filters.announcementType;
+    const tagOk = tagFilter === "All" || (item.tag || "") === tagFilter;
+    return typeOk && tagOk;
+  });
   return `
     <section class="page-head">
       ${sectionLabel("05", "Structured updates")}
@@ -1151,7 +1256,7 @@ export function renderAnnouncements() {
     </section>
     <div class="filters">
       ${selectField("announcementType", "Source Type", ["All", "Club", "School"], state.filters.announcementType)}
-      ${selectField("announcementTag", "Tag", ["All", ...platformSettings().announcementTags], "All")}
+      ${selectField("announcementTag", "Tag", ["All", ...platformSettings().announcementTags], state.filters.announcementTag || "All")}
     </div>
     ${filtered.length ? `<div class="updates">${filtered.map(renderAnnouncement).join("")}</div>` : renderEmptyState("No announcements yet", "Approved clubs and school representatives can publish structured updates.")}
     <div style="text-align:center; margin-top: 30px;"><button class="btn secondary" data-action="load-more" data-collection="announcements">Load More</button></div>
@@ -1161,8 +1266,7 @@ export function renderAnnouncements() {
 export function renderAnnouncementDetail() {
   const item = announcements.find(a => a.id === state.selectedAnnouncementId);
   if (!item) {
-    state.selectedAnnouncementId = null;
-    return renderAnnouncements();
+    return renderNotFound("Announcement not found", "This update may have been removed, unpublished, or is older than 30 days.", "close-announcement-detail", "All updates");
   }
 
   const tagColors = {
@@ -1172,7 +1276,7 @@ export function renderAnnouncementDetail() {
     Update: "#1a5a8a",
     Recruitment: "#2a7a4a",
   };
-  const tagColor = tagColors[item.tag] || "#8a7a6a";
+  const tagColor = tagColors[item.tag] || "#756552";
 
   const canEdit = canManageAnnouncement(item);
 
@@ -1182,7 +1286,7 @@ export function renderAnnouncementDetail() {
       <div style="display:flex;align-items:center;justify-content:space-between;padding:20px 20px 0;">
         <button style="
           background:none;border:none;
-          font-size:12px;font-weight:700;color:#8a7a6a;
+          font-size:12px;font-weight:700;color:#756552;
           font-family:inherit;text-transform:uppercase;letter-spacing:0.08em;
           cursor:pointer;display:inline-flex;align-items:center;gap:6px;
         " data-action="close-announcement-detail">← Announcements</button>
@@ -1196,7 +1300,7 @@ export function renderAnnouncementDetail() {
           " data-action="edit-announcement" data-docid="${item.id}">Edit</button>
           <button style="
             background:none;border:1.5px solid #c8b89a;
-            color:#a09080;padding:5px 14px;
+            color:#6a5a4a;padding:5px 14px;
             font-size:11px;font-weight:700;font-family:inherit;
             letter-spacing:0.05em;text-transform:uppercase;cursor:pointer;
           " data-action="${item.sourceType === "school" ? "delete-school-announcement" : "delete-club-announcement"}" data-docid="${item.id}">Delete</button>
@@ -1210,10 +1314,10 @@ export function renderAnnouncementDetail() {
             font-size:10px;font-weight:800;
             color:${tagColor};
             background:${tagColor}18;
-            padding:3px 12px;
+            padding:8px 12px;min-height:36px;
             font-family:inherit;text-transform:uppercase;letter-spacing:0.1em;
           ">${escapeHtml(item.tag || "Notice")}</span>
-          <span style="font-size:12px;color:#8a7a6a;font-family:inherit;">${escapeHtml(item.source || "")} · ${escapeHtml(item.time || "")}</span>
+          <span style="font-size:12px;color:#756552;font-family:inherit;">${escapeHtml(item.source || "")} · ${escapeHtml(formatRelativeTime(item.createdAt, item.time || ""))}</span>
         </div>
 
         <h1 style="font-size:26px;font-weight:900;color:#1a1a1a;margin:0 0 24px;font-family:inherit;line-height:1.15;">${escapeHtml(item.title || "")}</h1>
@@ -1222,22 +1326,23 @@ export function renderAnnouncementDetail() {
 
         ${item.imageUrl ? `
           <div style="margin-bottom:24px;">
-            <img src="${escapeHtml(item.imageUrl)}" style="width:100%;max-height:400px;object-fit:cover;" alt="Announcement image" />
+            <img src="${safeUrl(item.imageUrl)}" style="width:100%;max-height:400px;object-fit:cover;" alt="Announcement image" />
           </div>` : ""}
 
         <p style="font-size:15px;color:#3a3a3a;line-height:1.85;font-family:inherit;margin-bottom:28px;white-space:pre-line;">${escapeHtml(item.description || "")}</p>
 
         <div style="height:1px;background:#d8cfc4;margin-bottom:16px;"></div>
 
-        ${item.link ? `
+        ${safeUrl(item.link) ? `
           <div style="margin-bottom:24px;">
-            <a href="${escapeHtml(item.link)}" target="_blank" rel="noopener" style="background:#D7AC54;color:#1a1a1a;border:none;padding:12px 24px;font-size:12px;font-weight:800;font-family:inherit;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:6px;">Join / Learn More →</a>
+            <a href="${safeUrl(item.link)}" target="_blank" rel="noopener" style="background:#D7AC54;color:#1a1a1a;border:none;padding:12px 24px;font-size:12px;font-weight:800;font-family:inherit;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:6px;">Join / Learn More →</a>
           </div>` : ""}
 
         <div style="display:flex;align-items:center;justify-content:space-between;">
 
-          <p style="font-size:12px;color:#8a7a6a;margin:0;font-family:inherit;">Posted by ${escapeHtml(item.source || "")} · ${escapeHtml(item.time || "")}</p>
-          <button style="background:none;border:none;color:#a09080;font-size:11px;font-family:inherit;cursor:pointer;text-transform:uppercase;letter-spacing:0.05em;" data-action="flag-content" data-docid="${item.id}" data-kind="announcement" data-title="${escapeHtml(item.title)}">Report</button>
+          <p style="font-size:12px;color:#756552;margin:0;font-family:inherit;">Posted by ${escapeHtml(item.source || "")} · ${escapeHtml(formatRelativeTime(item.createdAt, item.time || ""))}</p>
+          <button style="background:none;border:1.5px solid #c8b89a;color:#5a4a3a;padding:10px 16px;min-height:40px;font-size:12px;font-weight:600;font-family:inherit;cursor:pointer;text-transform:uppercase;letter-spacing:0.05em;" data-action="${isItemSaved(item.id, "announcement") ? "unsave-item" : "save-item"}" data-docid="${item.id}" data-kind="announcement" data-title="${escapeHtml(item.title || "")}">${isItemSaved(item.id, "announcement") ? "Saved" : "Save"}</button>
+          <button style="background:none;border:1.5px solid #d8cfc4;color:#6a5a4a;padding:10px 14px;min-height:40px;font-size:11px;font-family:inherit;cursor:pointer;text-transform:uppercase;letter-spacing:0.05em;" data-action="flag-content" data-docid="${item.id}" data-kind="announcement" data-title="${escapeHtml(item.title)}">Report</button>
         </div>
 
       </div>
@@ -1266,7 +1371,7 @@ export function renderProfile() {
     border:1.5px solid var(--gold,#D7AC54);
     color:var(--navy,#233039);
     border-radius:2px;
-    padding:4px 14px;
+    padding:8px 14px;min-height:36px;
     font-size:12px;font-weight:500;
     font-family:inherit;
   ">${text}</span>`;
@@ -1274,7 +1379,7 @@ export function renderProfile() {
   const section = (title, content) => `
     <div style="margin-bottom:0;">
       <div style="padding:20px 0 6px;">
-        <p style="font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#8a7a6a;margin:0 0 14px;font-family:inherit;">${title}</p>
+        <p style="font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#756552;margin:0 0 14px;font-family:inherit;">${title}</p>
         ${content}
       </div>
       <div style="height:1px;background:#d8cfc4;"></div>
@@ -1296,33 +1401,23 @@ export function renderProfile() {
 
   const interestContent = (state.user.interests || []).length
     ? `<div style="display:flex;flex-wrap:wrap;gap:8px;">${state.user.interests.map(chip).join("")}</div>`
-    : `<p style="font-size:13px;color:#8a7a6a;margin:0;">No interests selected yet.</p>`;
+    : `<p style="font-size:13px;color:#756552;margin:0;">No interests selected yet.</p>`;
 
   const followContent = state.followedClubs.length
     ? state.followedClubs.map(c => `
       <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid #e8e0d4;">
         <span style="font-size:14px;font-weight:600;color:#1a1a1a;font-family:inherit;">${escapeHtml(c.clubName || "Club")}</span>
         <div style="display:flex;gap:8px;">
-          <button style="background:none;border:1.5px solid #c8b89a;padding:4px 12px;font-size:12px;color:#5a4a3a;cursor:pointer;font-family:inherit;" data-action="open-club" data-club="${c.clubId || ""}">View →</button>
-          <button style="background:none;border:1.5px solid #c8b89a;padding:4px 12px;font-size:12px;color:#a09080;cursor:pointer;font-family:inherit;" data-action="unfollow-club" data-docid="${c.clubId || ""}" data-title="${escapeHtml(c.clubName || "")}">Unfollow</button>
+          <button style="background:none;border:1.5px solid #c8b89a;padding:8px 12px;min-height:36px;font-size:12px;color:#5a4a3a;cursor:pointer;font-family:inherit;" data-action="open-club" data-club="${c.clubId || ""}">View →</button>
+          <button style="background:none;border:1.5px solid #c8b89a;padding:8px 12px;min-height:36px;font-size:12px;color:#6a5a4a;cursor:pointer;font-family:inherit;" data-action="unfollow-club" data-docid="${c.clubId || ""}" data-title="${escapeHtml(c.clubName || "")}">Unfollow</button>
         </div>
       </div>`).join("")
-    : `<p style="font-size:13px;color:#8a7a6a;margin:0;padding:8px 0;">No clubs followed yet.</p>`;
-
-  const rsvpContent = state.rsvps.length
-    ? state.rsvps.map(r => listRow(
-      `<div>
-          <p style="font-size:14px;font-weight:600;color:#1a1a1a;margin:0 0 3px;font-family:inherit;">${escapeHtml(r.title || "Event")}</p>
-        </div>`,
-      badge(r.status || "going", r.status === "interested" ? "#D7AC54" : "#2a7a4a")
-    )).join("")
-    : `<p style="font-size:13px;color:#8a7a6a;margin:0;padding:8px 0;">No RSVPs yet.</p>`;
-
+    : `<p style="font-size:13px;color:#756552;margin:0;padding:8px 0;">No clubs followed yet.</p>`;
 
   const clubAppsContent = state.clubApplications.length
     ? state.clubApplications.map(a => {
       const club = clubs.find(c => c.id === a.clubId) || { name: "Unknown Club" };
-      const b = badge(a.status || "pending", a.status === "approved" ? "#2a7a4a" : a.status === "rejected" ? "#dc2626" : "#8a7a6a");
+      const b = badge(a.status || "pending", a.status === "approved" ? "#2a7a4a" : a.status === "rejected" ? "#dc2626" : "#756552");
       const withdrawBtn = a.status === "pending"
         ? `<button style="background:none;border:none;color:#dc2626;font-size:11px;font-weight:700;text-transform:uppercase;cursor:pointer;margin-left:12px;font-family:inherit;" data-action="withdraw-club-application" data-docid="${a.id}">Withdraw</button>`
         : "";
@@ -1331,7 +1426,7 @@ export function renderProfile() {
         `<div style="display:flex;align-items:center;">${b}${withdrawBtn}</div>`
       );
     }).join("")
-    : `<p style="font-size:13px;color:#8a7a6a;margin:0;padding:8px 0;">No club applications yet.</p>`;
+    : `<p style="font-size:13px;color:#756552;margin:0;padding:8px 0;">No club applications yet.</p>`;
 
   const savedContent = state.savedItems.length
     ? state.savedItems.map(s => {
@@ -1342,20 +1437,15 @@ export function renderProfile() {
             <p style="font-size:14px;font-weight:500;color:#1a1a1a;margin:0;font-family:inherit;">${escapeHtml(s.title || "Saved")}</p>
           </div>`,
         `<div style="display:flex;gap:8px;">
-          <button style="background:none;border:1.5px solid #c8b89a;border-radius:0;padding:3px 12px;font-size:12px;color:#5a4a3a;cursor:pointer;font-family:inherit;" data-action="open-${s.type}-detail" data-docid="${s.itemId || ""}">View →</button>
-          <button style="background:none;border:1.5px solid #c8b89a;border-radius:0;padding:3px 12px;font-size:12px;color:#a09080;cursor:pointer;font-family:inherit;" data-action="unsave-item" data-docid="${s.itemId || ""}" data-kind="${s.type || "item"}" data-title="${escapeHtml(s.title || "")}">Unsave</button>
+          ${savedItemAction(s.type) ? `<button style="background:none;border:1.5px solid #c8b89a;border-radius:0;padding:8px 12px;min-height:36px;font-size:12px;color:#5a4a3a;cursor:pointer;font-family:inherit;" data-action="${savedItemAction(s.type)}" data-docid="${escapeHtml(s.itemId || "")}" data-club="${escapeHtml(s.itemId || "")}">View →</button>` : ""}
+          <button style="background:none;border:1.5px solid #c8b89a;border-radius:0;padding:8px 12px;min-height:36px;font-size:12px;color:#6a5a4a;cursor:pointer;font-family:inherit;" data-action="unsave-item" data-docid="${s.itemId || ""}" data-kind="${s.type || "item"}" data-title="${escapeHtml(s.title || "")}">Unsave</button>
         </div>`
       );
     }).join("")
-    : `<p style="font-size:13px;color:#8a7a6a;margin:0;padding:8px 0;">Nothing saved yet.</p>`;
+    : `<p style="font-size:13px;color:#756552;margin:0;padding:8px 0;">Nothing saved yet.</p>`;
 
   const recentActivity = [
-    ...state.rsvps.slice(0, 2).map(r => ({
-      type: "rsvp",
-      text: `You RSVPed to ${escapeHtml(r.title || "an event")}`,
-      status: r.status || "going",
-    })),
-    ...state.followedClubs.slice(0, 1).map(c => ({
+    ...state.followedClubs.slice(0, 2).map(c => ({
       type: "follow",
       text: `You follow ${c.clubName || "a club"}`,
       status: "following",
@@ -1365,7 +1455,7 @@ export function renderProfile() {
   const activityColors = {
     going: "#2a7a4a",
     interested: "#D7AC54",
-    pending: "#8a7a6a",
+    pending: "#756552",
     accepted: "#2a7a4a",
     rejected: "#dc2626",
     following: "#5a4a9a",
@@ -1393,28 +1483,37 @@ export function renderProfile() {
 
       <div style="margin-bottom:6px;">
         <p style="font-size:13px;color:#5a4a3a;margin:0 0 2px;font-family:inherit;">${escapeHtml(state.user.school || "")}</p>
-        <p style="font-size:13px;color:#8a7a6a;margin:0 0 16px;font-family:inherit;">Year ${escapeHtml(state.user.year || "1")}</p>
+        <p style="font-size:13px;color:#756552;margin:0 0 16px;font-family:inherit;">Year ${escapeHtml(state.user.year || "1")}</p>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
           <button style="
             background:none;border:1.5px solid #c8b89a;
-            border-radius:0;padding:6px 16px;
+            border-radius:0;padding:9px 16px;min-height:40px;
             font-size:12px;font-weight:500;color:#5a4a3a;
             cursor:pointer;font-family:inherit;
           " data-action="edit-profile">Edit Profile</button>
           <button style="
             background:none;border:1.5px solid #c8b89a;
-            border-radius:0;padding:6px 16px;
+            border-radius:0;padding:9px 16px;min-height:40px;
             font-size:12px;font-weight:500;color:#5a4a3a;
             cursor:pointer;font-family:inherit;
           " data-action="edit-interests">Edit Interests</button>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           ${((state.host.clubAccesses || []).length + state.clubApplications.filter(a => a.status === 'pending').length) < 5 ? `
-            <button style="background:none;border:1.5px solid #D7AC54;color:#8a6a2a;padding:6px 16px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;" data-action="open-club-apply-modal">Apply to existing club</button>
-            <button style="background:none;border:1.5px solid #D7AC54;color:#8a6a2a;padding:6px 16px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;" data-action="create-new-club-onboarding">Create new club</button>
+            <button style="background:none;border:1.5px solid #D7AC54;color:#8a6a2a;padding:9px 16px;min-height:40px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;" data-action="open-club-apply-modal">Apply to existing club</button>
+            <button style="background:none;border:1.5px solid #D7AC54;color:#8a6a2a;padding:9px 16px;min-height:40px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;" data-action="create-new-club-onboarding">Create new club</button>
           ` : ""}
-          <button style="background:none;border:1.5px solid #D7AC54;color:#8a6a2a;padding:6px 16px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;" data-action="start-school-rep-apply">Apply as School Rep</button>
-
+          ${(() => {
+            // Re-submitting rewrites the canonical grant back to pending, revoking their own access.
+            if (isSchoolRep() && state.host.approved) {
+              return `<span style="font-size:12px;color:#5a4a3a;font-family:inherit;padding:6px 0;">School rep for ${escapeHtml(state.host.school || state.user.school || "your school")}</span>`;
+            }
+            const pendingRep = (state.hostRequests || []).some((r) => r.type === "schoolRepresentative" && r.status === "pending");
+            if (pendingRep) {
+              return `<span style="font-size:12px;color:#5a4a3a;font-family:inherit;padding:6px 0;">School rep application under review</span>`;
+            }
+            return `<button style="background:none;border:1.5px solid #D7AC54;color:#8a6a2a;padding:9px 16px;min-height:40px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;" data-action="start-school-rep-apply">Apply as School Rep</button>`;
+          })()}
         </div>
       </div>
 
@@ -1427,8 +1526,8 @@ export function renderProfile() {
               <p style="font-size:13px;color:#1a1a1a;margin:0;font-family:inherit;">${escapeHtml(item.text)}</p>
               <span style="
                 padding:2px 10px;font-size:10px;font-weight:700;
-                color:${activityColors[item.status] || "#8a7a6a"};
-                background:${activityColors[item.status] || "#8a7a6a"}18;
+                color:${activityColors[item.status] || "#756552"};
+                background:${activityColors[item.status] || "#756552"}18;
                 font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;
               ">${escapeHtml(item.status)}</span>
             </div>`).join("")
@@ -1449,22 +1548,22 @@ export function renderProfile() {
 
 export function renderSchoolRepApplyModal() {
   return `
-    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px 0 80px;">
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px 0 80px;" role="dialog" aria-modal="true">
       <div style="background:#f5f2ec;width:100%;max-width:500px;margin:0 16px;">
         <div style="padding:24px 24px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1.5px solid #d8cfc4;">
           <h2 style="font-size:18px;font-weight:800;color:#1a1a1a;margin:0;font-family:inherit;text-transform:uppercase;letter-spacing:0.03em;">Apply as School Rep</h2>
-          <button style="background:none;border:none;font-size:20px;color:#8a7a6a;cursor:pointer;" data-action="close-school-rep-apply-modal">×</button>
+          <button style="background:none;border:none;font-size:20px;color:#756552;cursor:pointer;" data-action="close-school-rep-apply-modal">×</button>
         </div>
         <div style="padding:24px;">
           <p style="font-size:13px;color:#5a4a3a;margin:0 0 20px;font-family:inherit;line-height:1.6;">
             <strong>Note:</strong> Your application will be reviewed by the Super Admin before approval. (Setting the Firestore request status to approved also unlocks access.)
           </p>
           <div style="margin-bottom:20px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Reason for applying *</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Reason for applying *</label>
             <textarea id="sr-reason" placeholder="Why do you want to be a School Representative?" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;resize:vertical;min-height:100px;"></textarea>
           </div>
           <div style="margin-bottom:24px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Have you discussed this with your Dean / Dean of Student Affairs? *</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Have you discussed this with your Dean / Dean of Student Affairs? *</label>
             <div style="display:flex;gap:12px;">
               <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;font-family:inherit;color:#1a1a1a;">
                 <input type="radio" name="sr-dean" value="Yes" style="accent-color:#D7AC54;" /> Yes
@@ -1487,7 +1586,7 @@ export function renderSchoolRepApplyModal() {
 export function renderProfileInterestsModal() {
   return `
     <div class="modal-layer">
-      <section class="modal">
+        <section class="modal" role="dialog" aria-modal="true">
         <p class="eyebrow">Edit Profile</p>
         <h2>Your Interests</h2>
         <p>Select topics that match your campus goals.</p>
@@ -1502,22 +1601,34 @@ export function renderProfileInterestsModal() {
 }
 
 export function renderClubApplyModal() {
-  const eligible = clubs.filter(c =>
-    c.status === "approved" &&
-    !state.clubApplications.some(a => a.clubId === (c.id || c.slug) && a.status === "pending")
+  // Exclude clubs the user already belongs to, or Submit always fails.
+  const myEmail = String(state.authUser?.email || "").trim().toLowerCase();
+  const alreadyCoreIds = new Set(
+    (state.host.clubAccesses || []).map((a) => a.club?.id || a.club?.slug).filter(Boolean)
   );
+  const eligible = clubs.filter((c) => {
+    const clubId = c.id || c.slug;
+    if (c.status !== "approved") return false;
+    if (alreadyCoreIds.has(clubId)) return false;
+    const app = state.clubApplications.find((a) => a.clubId === clubId);
+    if (app && (app.status === "pending" || app.status === "approved")) return false;
+    // Founder/president/advisor of the club is already core by definition.
+    if (myEmail && [c.founderEmail, c.currentPresidentEmail, c.facultyAdvisorEmail]
+      .filter(Boolean).some((e) => String(e).trim().toLowerCase() === myEmail)) return false;
+    return true;
+  });
   return `
-    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px;">
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:1000;display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto;" role="dialog" aria-modal="true">
       <div style="background:#f5f2ec;width:100%;max-width:480px;box-shadow:0 8px 40px rgba(0,0,0,0.18);">
         <div style="padding:24px 24px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1.5px solid #d8cfc4;">
           <h2 style="font-size:16px;font-weight:800;color:#1a1a1a;margin:0;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;">Apply for Club Core</h2>
-          <button style="background:none;border:none;font-size:22px;color:#8a7a6a;cursor:pointer;font-family:inherit;line-height:1;" data-action="close-club-apply-modal">×</button>
+          <button style="background:none;border:none;font-size:22px;color:#756552;cursor:pointer;font-family:inherit;line-height:1;" data-action="close-club-apply-modal">×</button>
         </div>
         <div style="padding:24px;">
           <p style="font-size:13px;color:#5a4a3a;margin:0 0 20px;font-family:inherit;line-height:1.6;">Select the club you'd like to join as a core member. Your application will be reviewed by the club's current core team.</p>
           ${eligible.length ? `
             <div style="margin-bottom:20px;">
-              <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Select Club *</label>
+              <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Select Club *</label>
               <select id="club-apply-select" style="width:100%;border:1.5px solid #c8b89a;background:#fff;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;">
                 <option value="">-- Choose a club --</option>
                 ${eligible.map(c => `<option value="${escapeHtml(c.id || c.slug)}">${escapeHtml(c.name)}</option>`).join("")}
@@ -1528,7 +1639,7 @@ export function renderClubApplyModal() {
               <button style="background:none;border:1.5px solid #c8b89a;color:#5a4a3a;padding:12px 20px;font-size:12px;font-weight:700;font-family:inherit;letter-spacing:0.05em;text-transform:uppercase;cursor:pointer;" data-action="close-club-apply-modal">Cancel</button>
             </div>
           ` : `
-            <p style="font-size:13px;color:#8a7a6a;margin:0 0 20px;font-family:inherit;">You have already applied to all available clubs, or have pending applications for each.</p>
+            <p style="font-size:13px;color:#756552;margin:0 0 20px;font-family:inherit;">You have already applied to all available clubs, or have pending applications for each.</p>
             <button style="background:#1a1a1a;color:#f5f2ec;border:none;padding:10px 24px;font-size:12px;font-weight:700;font-family:inherit;text-transform:uppercase;cursor:pointer;" data-action="close-club-apply-modal">Close</button>
           `}
         </div>
@@ -1539,25 +1650,25 @@ export function renderClubApplyModal() {
 
 export function renderEditProfileModal() {
   return `
-    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px;">
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto;" role="dialog" aria-modal="true">
       <div style="background:#f5f2ec;width:100%;max-width:480px;">
 
         <div style="padding:24px 24px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1.5px solid #d8cfc4;">
           <h2 style="font-size:16px;font-weight:800;color:#1a1a1a;margin:0;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;">Edit Profile</h2>
-          <button style="background:none;border:none;font-size:20px;color:#8a7a6a;cursor:pointer;font-family:inherit;" data-action="close-edit-profile">×</button>
+          <button style="background:none;border:none;font-size:20px;color:#756552;cursor:pointer;font-family:inherit;" data-action="close-edit-profile">×</button>
         </div>
 
         <div style="padding:24px;">
 
           <div style="margin-bottom:16px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Display Name</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Display Name</label>
             <input id="ep-name" type="text" value="${escapeHtml(state.user.name || "")}" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
           </div>
 
           ${modalSelectField("ep-school", "School", schools, state.user.school)}
 
           <div style="margin-bottom:24px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Year</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Year</label>
             <div style="display:flex;gap:8px;">
               ${["1", "2", "3", "4"].map(y => `
                 <button style="
@@ -1582,21 +1693,21 @@ export function renderEditProfileModal() {
 }
 
 export function sectionLabel(number, label) {
+  // label is sometimes user-controlled (club.category on the club detail page), so escape both.
   return `
     <div class="section-label">
-      <span class="section-num">${number}</span>
-      <span class="eyebrow">${label}</span>
+      <span class="section-num">${escapeHtml(number)}</span>
+      <span class="eyebrow">${escapeHtml(label)}</span>
     </div>
   `;
 }
-
 
 export * from "./render-admin.js";
 
 export function renderEventCard(event) {
   const colors = event.colors || ["#233039", "#926d2f"];
-  const date = escapeHtml(event.date || "TBA");
-  const dateParts = date.split(" ");
+  // eventDateParts handles both YYYY-MM-DD (real) and "May 22" (demo fixtures).
+  const dateParts = event.date ? eventDateParts(event.date) : { month: "TBA", day: "" };
   const tags = event.tags || [];
   const isPast = event.past === true;
   const isMyEvent = canManageEvent(event);
@@ -1609,43 +1720,45 @@ export function renderEventCard(event) {
     hostDisplay = schoolName;
   }
 
-  const joinButton = event.link
-    ? `<button style="background:#D7AC54;color:#1a1a1a;border:none;padding:6px 16px;font-size:12px;font-weight:700;font-family:inherit;letter-spacing:0.05em;cursor:pointer;text-transform:uppercase;" data-action="open-external-link" data-url="${escapeHtml(event.link)}">Join</button>`
+  // safeUrl() returns "" for non-http(s), so a javascript: link produces no button.
+  const joinUrl = safeUrl(event.link);
+  const joinButton = joinUrl
+    ? `<button style="background:#D7AC54;color:#1a1a1a;border:none;padding:9px 16px;min-height:40px;font-size:12px;font-weight:700;font-family:inherit;letter-spacing:0.05em;cursor:pointer;text-transform:uppercase;" data-action="open-external-link" data-url="${joinUrl}">Join</button>`
     : "";
 
   const actionButtons = isPast
     ? `<div style="margin-top:10px;">
-      <button style="background:none;border:none;color:#a09080;padding:0;font-size:11px;font-family:inherit;cursor:pointer;text-transform:uppercase;letter-spacing:0.05em;" data-action="flag-content" data-docid="${event.id}" data-kind="event" data-title="${escapeHtml(event.title)}">Report</button>
+      <button style="background:none;border:none;color:#6a5a4a;padding:0;font-size:11px;font-family:inherit;cursor:pointer;text-transform:uppercase;letter-spacing:0.05em;" data-action="flag-content" data-docid="${event.id}" data-kind="event" data-title="${escapeHtml(event.title)}">Report</button>
     </div>`
     : `<div style="display:flex;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap;">
       ${joinButton}
-      <button style="background:none;border:1.5px solid #c8b89a;color:#5a4a3a;padding:6px 14px;font-size:12px;font-weight:600;font-family:inherit;letter-spacing:0.05em;cursor:pointer;text-transform:uppercase;" data-action="${saved ? "unsave-item" : "save-item"}" data-docid="${event.id}" data-kind="event" data-title="${escapeHtml(event.title)}">${saved ? "Saved" : "Save"}</button>
-      <button style="background:none;border:1.5px solid #c8b89a;color:#5a4a3a;padding:6px 14px;font-size:12px;font-weight:600;font-family:inherit;letter-spacing:0.05em;cursor:pointer;text-transform:uppercase;" data-action="calendar-event" data-docid="${event.id}">Calendar</button>
-      <button style="background:none;border:none;color:#a09080;padding:6px 10px;font-size:11px;font-family:inherit;cursor:pointer;text-transform:uppercase;letter-spacing:0.05em;" data-action="flag-content" data-docid="${event.id}" data-kind="event" data-title="${escapeHtml(event.title)}">Report</button>
+      <button style="background:none;border:1.5px solid #c8b89a;color:#5a4a3a;padding:9px 14px;min-height:40px;font-size:12px;font-weight:600;font-family:inherit;letter-spacing:0.05em;cursor:pointer;text-transform:uppercase;" data-action="${saved ? "unsave-item" : "save-item"}" data-docid="${event.id}" data-kind="event" data-title="${escapeHtml(event.title)}">${saved ? "Saved" : "Save"}</button>
+      <button style="background:none;border:1.5px solid #c8b89a;color:#5a4a3a;padding:9px 14px;min-height:40px;font-size:12px;font-weight:600;font-family:inherit;letter-spacing:0.05em;cursor:pointer;text-transform:uppercase;" data-action="calendar-event" data-docid="${event.id}">Calendar</button>
+      <button style="background:none;border:1.5px solid #d8cfc4;color:#6a5a4a;padding:9px 12px;min-height:40px;font-size:11px;font-family:inherit;cursor:pointer;text-transform:uppercase;letter-spacing:0.05em;" data-action="flag-content" data-docid="${event.id}" data-kind="event" data-title="${escapeHtml(event.title)}">Report</button>
     </div>`;
 
   return `
     <article class="card event-card" style="opacity:${isPast ? "0.55" : "1"};cursor:pointer;" data-action="open-event-detail" data-docid="${event.id}">
       <div class="poster" style="--poster-a:${colors[0]};--poster-b:${colors[1]}">
-        <strong>${dateParts[0]}<br>${dateParts[1] || ""}</strong>
+        <strong>${escapeHtml(dateParts.month)}<br>${escapeHtml(dateParts.day)}</strong>
         <span>${escapeHtml(event.type || "Event")}</span>
       </div>
       <div class="card-body">
-        ${isPast ? `<span style="font-size:10px;font-weight:700;color:#8a7a6a;font-family:inherit;text-transform:uppercase;letter-spacing:0.08em;display:block;margin-bottom:6px;">PAST EVENT</span>` : ""}
+        ${isPast ? `<span style="font-size:10px;font-weight:700;color:#756552;font-family:inherit;text-transform:uppercase;letter-spacing:0.08em;display:block;margin-bottom:6px;">PAST EVENT</span>` : ""}
         ${event.cancelled ? `<span style="background:#fee2e2;color:#dc2626;padding:2px 10px;font-size:10px;font-weight:700;font-family:inherit;letter-spacing:0.08em;text-transform:uppercase;">CANCELLED</span>` : ""}
-        <div class="meta"><span>${date} · ${escapeHtml(event.time || "Time TBA")}</span><span>${escapeHtml(event.location || "Location TBA")}</span></div>
+        <div class="meta"><span>${escapeHtml(formatEventDate(event.date) || "Date TBA")} · ${escapeHtml(event.time || "Time TBA")}</span><span>${escapeHtml(event.location || "Location TBA")}</span></div>
         ${event.registrationDeadline ? `<p style="font-size:11px;color:#8a6a2a;margin:0 0 6px;font-family:inherit;">Registration reminder: ${escapeHtml(event.registrationDeadline)}</p>` : ""}
         <h3>${escapeHtml(event.title)}</h3>
         <p>${escapeHtml(event.description || "")}</p>
         <div class="chip-grid">${tags.map((tag) => `<span class="tag gold">${escapeHtml(tag)}</span>`).join("")}<span class="tag">${escapeHtml(hostDisplay)}</span></div>
         ${(event.collaboratingClubs || []).length ? `
-          <p style="font-size:12px;color:#8a7a6a;margin:3px 0 0;font-family:inherit;">
+          <p style="font-size:12px;color:#756552;margin:3px 0 0;font-family:inherit;">
             with ${event.collaboratingClubs.map(c => escapeHtml(c)).join(", ")}
           </p>` : ""}
         ${actionButtons}
         ${isMyEvent ? `<div style="display:flex;gap:8px;margin-top:8px;padding-top:8px;border-top:1px solid #e8e0d4;">
-          <button style="background:none;border:1.5px solid #c8b89a;padding:4px 12px;font-size:11px;font-weight:600;color:#5a4a3a;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;" data-action="open-edit-event" data-docid="${event.id}">Edit</button>
-          <button style="background:none;border:1.5px solid #c8b89a;padding:4px 12px;font-size:11px;font-weight:600;color:#a09080;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;" data-action="${event.hostType === "school" ? "delete-school-event" : "delete-club-event"}" data-docid="${event.id}">Delete</button>
+          <button style="background:none;border:1.5px solid #c8b89a;padding:8px 12px;min-height:36px;font-size:11px;font-weight:600;color:#5a4a3a;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;" data-action="open-edit-event" data-docid="${event.id}">Edit</button>
+          <button style="background:none;border:1.5px solid #c8b89a;padding:8px 12px;min-height:36px;font-size:11px;font-weight:600;color:#6a5a4a;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;" data-action="${event.hostType === "school" ? "delete-school-event" : "delete-club-event"}" data-docid="${event.id}">Delete</button>
         </div>` : ""}
       </div>
     </article>
@@ -1668,7 +1781,7 @@ export function renderUpdate(item) {
 
   return `
     <article class="update-item">
-      <div class="meta"><span class="tag gold">${escapeHtml(item.tag || "Update")}</span><span>${escapeHtml(hostDisplay)}</span><span>${escapeHtml(item.time || "")}</span></div>
+      <div class="meta"><span class="tag gold">${escapeHtml(item.tag || "Update")}</span><span>${escapeHtml(hostDisplay)}</span><span>${escapeHtml(formatRelativeTime(item.createdAt, item.time || ""))}</span></div>
       <h3>${escapeHtml(item.title)}</h3>
       <p>${escapeHtml(item.description || "")}</p>
       <div class="project-actions">
@@ -1704,32 +1817,34 @@ export function renderClubCard(club) {
 }
 
 export function renderProjectCard(project) {
-  const status = project.status || "Open";
+  // Stored status is lowercase "open"/"closed" — compare case-insensitively.
+  const isOpen = String(project.status || "open").toLowerCase() !== "closed";
+  const statusLabel = isOpen ? "Open" : "Closed";
   const skills = project.skills || [];
   const isMyProject = project.postedBy === state.authUser?.email || isSuperAdmin();
   return `
     <article class="card project-card" style="cursor:pointer;" data-action="open-project-detail" data-docid="${project.id}">
       <div class="project-rail"><button data-action="${isItemSaved(project.id, "project") ? "unsave-item" : "save-item"}" data-kind="project" data-docid="${project.id}" data-title="${escapeHtml(project.title)}">${icon("bookmark")}</button><span>${project.score || 0}</span></div>
       <div class="card-body">
-        <div class="meta"><span class="status ${status.toLowerCase()}">${escapeHtml(status)}</span><span>Expires ${escapeHtml(project.expiry || "TBA")}</span></div>
+        <div class="meta"><span class="status ${isOpen ? "open" : "closed"}">${statusLabel}</span><span>Expires ${escapeHtml(project.expiry || "TBA")}</span></div>
         <h3>${escapeHtml(project.title)}</h3>
         <p>${escapeHtml(project.description || "")}</p>
         <div class="chip-grid">${skills.map((skill) => `<span class="tag">${escapeHtml(skill)}</span>`).join("")}</div>
         <div style="display:flex;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap;">
-          ${status === "Open" && project.applicationLink ? `<a href="${escapeHtml(project.applicationLink)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;background:#D7AC54;color:#1a1a1a;padding:6px 16px;font-size:12px;font-weight:700;font-family:inherit;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;">Apply ↗</a>` : ""}
-          <button style="background:none;border:1.5px solid #c8b89a;color:#5a4a3a;padding:6px 14px;font-size:12px;font-weight:600;font-family:inherit;letter-spacing:0.05em;cursor:pointer;text-transform:uppercase;" data-action="${isItemSaved(project.id, "project") ? "unsave-item" : "save-item"}" data-docid="${project.id}" data-kind="project" data-title="${escapeHtml(project.title)}">${isItemSaved(project.id, "project") ? "Saved" : "Save"}</button>
-          <button style="background:none;border:none;color:#a09080;padding:6px 10px;font-size:11px;font-family:inherit;cursor:pointer;text-transform:uppercase;letter-spacing:0.05em;" data-action="flag-content" data-docid="${project.id}" data-kind="project" data-title="${escapeHtml(project.title)}">Report</button>
+          ${isOpen && project.applicationLink ? `<a href="${safeUrl(project.applicationLink)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;background:#D7AC54;color:#1a1a1a;padding:9px 16px;min-height:40px;font-size:12px;font-weight:700;font-family:inherit;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;">Apply ↗</a>` : ""}
+          <button style="background:none;border:1.5px solid #c8b89a;color:#5a4a3a;padding:9px 14px;min-height:40px;font-size:12px;font-weight:600;font-family:inherit;letter-spacing:0.05em;cursor:pointer;text-transform:uppercase;" data-action="${isItemSaved(project.id, "project") ? "unsave-item" : "save-item"}" data-docid="${project.id}" data-kind="project" data-title="${escapeHtml(project.title)}">${isItemSaved(project.id, "project") ? "Saved" : "Save"}</button>
+          <button style="background:none;border:none;color:#6a5a4a;padding:9px 12px;min-height:40px;font-size:11px;font-family:inherit;cursor:pointer;text-transform:uppercase;letter-spacing:0.05em;" data-action="flag-content" data-docid="${project.id}" data-kind="project" data-title="${escapeHtml(project.title)}">Report</button>
         </div>
         ${isMyProject ? `<div style="display:flex;gap:8px;margin-top:8px;padding-top:8px;border-top:1px solid #e8e0d4;">
-          <button style="background:none;border:1.5px solid #c8b89a;padding:4px 12px;font-size:11px;font-weight:600;color:#5a4a3a;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;" 
-            data-action="toggle-project-status" 
-            data-docid="${project.id}" 
-            data-status="${escapeHtml(project.status)}">
-            ${project.status === "open" ? "Close Applications" : "Reopen"}
+          <button style="background:none;border:1.5px solid #c8b89a;padding:8px 14px;min-height:36px;font-size:11px;font-weight:600;color:#5a4a3a;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;"
+            data-action="toggle-project-status"
+            data-docid="${project.id}"
+            data-status="${isOpen ? "open" : "closed"}">
+            ${isOpen ? "Close Applications" : "Reopen"}
           </button>
-          <button style="background:none;border:1.5px solid #c8b89a;padding:4px 12px;font-size:11px;font-weight:600;color:#a09080;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;" 
-            data-action="delete-own-project" 
-            data-docid="${project.id}" 
+          <button style="background:none;border:1.5px solid #c8b89a;padding:8px 14px;min-height:36px;font-size:11px;font-weight:600;color:#8a6a4a;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;"
+            data-action="delete-own-project"
+            data-docid="${project.id}"
             data-title="${escapeHtml(project.title)}">Delete</button>
         </div>` : ""}
       </div>
@@ -1746,11 +1861,17 @@ export function renderAnnouncement(item) {
     hostDisplay = schoolName;
   }
 
+  const saved = isItemSaved(item.id, "announcement");
   return `
     <article class="card announcement" style="cursor:pointer;" data-action="open-announcement-detail" data-docid="${item.id}">
-      <div class="meta"><span class="tag gold">${escapeHtml(item.tag || "Update")}</span><span>${escapeHtml(hostDisplay)}</span><span>${escapeHtml(item.time || "")}</span></div>
+      <div class="meta"><span class="tag gold">${escapeHtml(item.tag || "Update")}</span><span>${escapeHtml(hostDisplay)}</span><span>${escapeHtml(formatRelativeTime(item.createdAt, item.time || ""))}</span></div>
       <h3>${escapeHtml(item.title)}</h3>
       <p>${escapeHtml(item.description || "")}</p>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap;">
+        ${safeUrl(item.link) ? `<button style="background:#D7AC54;color:#1a1a1a;border:none;padding:9px 16px;min-height:40px;font-size:12px;font-weight:700;font-family:inherit;letter-spacing:0.05em;cursor:pointer;text-transform:uppercase;" data-action="open-external-link" data-url="${safeUrl(item.link)}">Join</button>` : ""}
+        <button style="background:none;border:1.5px solid #c8b89a;color:#5a4a3a;padding:9px 14px;min-height:40px;font-size:12px;font-weight:600;font-family:inherit;letter-spacing:0.05em;cursor:pointer;text-transform:uppercase;" data-action="${saved ? "unsave-item" : "save-item"}" data-docid="${item.id}" data-kind="announcement" data-title="${escapeHtml(item.title || "")}">${saved ? "Saved" : "Save"}</button>
+        <button style="background:none;border:1.5px solid #d8cfc4;color:#6a5a4a;padding:9px 12px;min-height:40px;font-size:11px;font-family:inherit;cursor:pointer;text-transform:uppercase;letter-spacing:0.05em;" data-action="flag-content" data-docid="${item.id}" data-kind="announcement" data-title="${escapeHtml(item.title || "")}">Report</button>
+      </div>
     </article>
   `;
 }
@@ -1761,7 +1882,7 @@ export function renderOnboarding() {
   if (state.onboardingStep === "role") {
     return `
       <div class="modal-layer">
-        <section class="modal">
+        <section class="modal" role="dialog" aria-modal="true">
           <p class="eyebrow">Onboarding</p>
           <h2>How will you use RVU Connect?</h2>
           <p>Choose the mode that matches your campus role.</p>
@@ -1777,7 +1898,7 @@ export function renderOnboarding() {
   if (state.onboardingStep === "student-info") {
     return `
       <div class="modal-layer">
-        <section class="modal">
+        <section class="modal" role="dialog" aria-modal="true">
           <p class="eyebrow">Student profile</p>
           <h2>Basic information</h2>
           <div class="form-grid two">
@@ -1785,7 +1906,10 @@ export function renderOnboarding() {
             ${selectField("studentYear", "Year", ["1", "2", "3", "4"], state.user.year)}
           </div>
           ${selectField("studentSchool", "School", schools, state.user.school)}
-          <button class="btn gold" data-action="next-interests">Continue</button>
+          <div style="display:flex;gap:12px;">
+            <button class="btn gold" style="flex:1;" data-action="next-interests">Continue</button>
+            <button class="btn secondary" data-action="back-to-role">Back</button>
+          </div>
         </section>
       </div>
     `;
@@ -1793,11 +1917,14 @@ export function renderOnboarding() {
   if (state.onboardingStep === "student-interests") {
     return `
       <div class="modal-layer">
-        <section class="modal">
+        <section class="modal" role="dialog" aria-modal="true">
           <p class="eyebrow">Personalization</p>
           <h2>Select your interests</h2>
           <div class="chip-grid">${platformSettings().interestTags.map((interest) => `<button class="chip ${state.user.interests.includes(interest) ? "active" : ""}" data-interest="${interest}">${escapeHtml(interest)}</button>`).join("")}</div>
-          <button class="btn gold" data-action="finish-student">Explore your campus</button>
+          <div style="display:flex;gap:12px;">
+            <button class="btn gold" style="flex:1;" data-action="finish-student">Explore your campus</button>
+            <button class="btn secondary" data-action="back-to-student-info">Back</button>
+          </div>
         </section>
       </div>
     `;
@@ -1806,15 +1933,15 @@ export function renderOnboarding() {
     const clubOptions = clubs.length ? clubs.map((club) => ({ id: club.id || club.slug, name: club.name })) : [];
     return `
       <div class="modal-layer">
-        <section class="modal">
+        <section class="modal" role="dialog" aria-modal="true">
           <p class="eyebrow">Club core request</p>
           <h2>Which club are you core in?</h2>
           
           <div style="margin-bottom:16px;">
-            ${clubOptions.length ? multiSelectField("hostClubs", "Select Clubs", clubOptions, state.host.selectedClubIds) : "<p style='font-size:14px;color:#8a7a6a;margin-bottom:16px;'>No approved clubs available.</p>"}
+            ${clubOptions.length ? multiSelectField("hostClubs", "Select Clubs", clubOptions, state.host.selectedClubIds) : "<p style='font-size:14px;color:#756552;margin-bottom:16px;'>No approved clubs available.</p>"}
             <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
               <div style="flex:1;height:1.5px;background:#e8e0d4;"></div>
-              <span style="font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;">OR</span>
+              <span style="font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;">OR</span>
               <div style="flex:1;height:1.5px;background:#e8e0d4;"></div>
             </div>
             <button class="btn secondary" style="width:100%;margin-bottom:16px;" data-action="create-new-club-onboarding">Create new club</button>
@@ -1824,7 +1951,10 @@ export function renderOnboarding() {
             ${inputField("hostName", "Core display name", state.host.name)}
           </div>
           
-          <button class="btn gold" data-action="submit-host">Submit request</button>
+          <div style="display:flex;gap:12px;margin-top:4px;">
+            <button class="btn gold" style="flex:1;" data-action="submit-host">Submit request</button>
+            <button class="btn secondary" data-action="back-to-role">Back</button>
+          </div>
         </section>
       </div>
     `;
@@ -1833,7 +1963,7 @@ export function renderOnboarding() {
   if (state.onboardingStep === "create-club") {
     return `
       <div class="modal-layer">
-        <section class="modal">
+        <section class="modal" role="dialog" aria-modal="true">
           <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:8px;">
             <div>
               <p class="eyebrow">New Club Creation</p>
@@ -1847,14 +1977,14 @@ export function renderOnboarding() {
           </div>
           <div class="form-grid">
             <div class="field" style="margin-bottom:16px;">
-              <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">School Affiliation</label>
+              <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">School Affiliation</label>
               <select data-club-input="school" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;">
                 ${schools.map((school) => `<option value="${school}" ${state.clubDraft.school === school ? "selected" : ""}>${school}</option>`).join("")}
               </select>
             </div>
             ${clubInputField("tagline", "Tagline", state.clubDraft.tagline, "Short, catchy description")}
             <div class="field" style="margin-bottom:16px;">
-              <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Description</label>
+              <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;font-family:inherit;">Description</label>
               <textarea data-club-input="description" placeholder="What is this club about?" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;resize:vertical;min-height:80px;">${escapeHtml(state.clubDraft.description || "")}</textarea>
             </div>
             ${clubInputField("founderRole", "Your Role", state.clubDraft.founderRole || "core", "e.g. core, founder")}
@@ -1871,16 +2001,16 @@ export function renderOnboarding() {
   if (state.onboardingStep === "school-rep-details") {
     return `
       <div class="modal-layer">
-        <section class="modal">
+        <section class="modal" role="dialog" aria-modal="true">
           <p class="eyebrow">School representative</p>
           <h2>Almost done</h2>
           <p style="font-size:13px;color:#5a4a3a;margin:0 0 16px;line-height:1.6;">Your application will be reviewed by a Super Admin. You can also be approved by setting the request status to approved in Firestore.</p>
           <div style="margin-bottom:16px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;">Reason for applying *</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;">Reason for applying *</label>
             <textarea id="sr-onboard-reason" placeholder="Why do you want to be a School Representative?" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;resize:vertical;min-height:90px;"></textarea>
           </div>
           <div style="margin-bottom:20px;">
-            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;">Discussed with Dean / Dean of Student Affairs? *</label>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#756552;margin-bottom:8px;">Discussed with Dean / Dean of Student Affairs? *</label>
             <div style="display:flex;gap:12px;">
               <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;"><input type="radio" name="sr-onboard-dean" value="Yes" style="accent-color:#D7AC54;" /> Yes</label>
               <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;"><input type="radio" name="sr-onboard-dean" value="No" style="accent-color:#D7AC54;" /> No</label>
@@ -1894,13 +2024,21 @@ export function renderOnboarding() {
 
   if (state.onboardingStep === "host-review") {
     const isClubRequest = state._onboardingIntent === "club-core";
+    // Name the clubs actually selected — activeClub() falls back to clubs[0].
+    const selectedNames = (state.host.selectedClubIds || [])
+      .map((id) => clubs.find((c) => (c.id || c.slug) === id))
+      .filter(Boolean)
+      .map((c) => c.name);
+    const scope = isClubRequest
+      ? (selectedNames.length ? selectedNames.join(", ") : "Your selected club")
+      : (state.host.school || state.user.school || "Your school");
     return `
       <div class="modal-layer">
-        <section class="modal">
+        <section class="modal" role="dialog" aria-modal="true" aria-label="Request under review">
           <p class="eyebrow">Approval state</p>
           <h2>Your request is under review.</h2>
           <p>Until approved, this account cannot post events or announcements. ${isClubRequest ? "Existing club core members (or the club founder) review membership applications. New clubs and school-rep requests are approved by a Super Admin." : "School representative applications are approved by a Super Admin only."}</p>
-          <div class="approval"><strong>${state.host.name}</strong><br>${state.host.type} · ${isClubRequest ? activeClub().name : state.host.school}</div>
+          <div class="approval"><strong>${escapeHtml(state.host.name || state.user.name || "Your request")}</strong><br>${escapeHtml(state.host.type)} · ${escapeHtml(scope)}</div>
           <button class="btn gold" data-action="close-onboarding">Continue to campus</button>
         </section>
       </div>
@@ -1908,5 +2046,4 @@ export function renderOnboarding() {
   }
   return "";
 }
-
 

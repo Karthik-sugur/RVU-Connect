@@ -4,7 +4,6 @@ import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut } from
 import { handleFirebaseError } from "./errors.js";
 import { EMAIL_DOMAIN } from "./constants.js";
 
-
 function isRvuEmail(email) {
   return typeof email === "string" && email.trim().toLowerCase().endsWith(EMAIL_DOMAIN);
 }
@@ -263,6 +262,28 @@ function tracedWriteBatch(batchLabel) {
   };
 }
 
+/** Load failures for the current loadCampusData call, so the UI can tell empty from failed. */
+let _loadErrors = [];
+
+function beginLoadErrorCapture() {
+  _loadErrors = [];
+}
+
+function collectedLoadErrors() {
+  return _loadErrors.slice();
+}
+
+/** Newest-first by createdAt, undated last. See loadAdminTab for why this is not an orderBy. */
+function sortByCreatedAtDesc(list) {
+  const ms = (row) => {
+    const value = row?.createdAt;
+    const date = value?.toDate ? value.toDate() : (value ? new Date(value) : null);
+    const time = date?.getTime?.();
+    return Number.isFinite(time) ? time : -Infinity;
+  };
+  return [...(list || [])].sort((a, b) => ms(b) - ms(a));
+}
+
 async function rowsOrEmpty(label, promise) {
   try {
     return rows(await promise);
@@ -270,6 +291,7 @@ async function rowsOrEmpty(label, promise) {
     if (error?.code !== "permission-denied") {
       console.warn(`RVU Connect could not load ${label}:`, error);
     }
+    _loadErrors.push({ label, code: error?.code || "unknown", message: error?.message || String(error) });
     return [];
   }
 }
@@ -332,6 +354,8 @@ async function saveUserProfile(uid, data) {
 
 let lastDocs = { events: null, announcements: null, projects: null };
 
+const ADMIN_PAGE_SIZE = 50;
+
 /**
  * Resolve club-core access with direct document reads (no collectionGroup).
  * Source of truth: clubs/{clubId}/coreMembers/{emailLower} with status == approved.
@@ -377,22 +401,35 @@ async function resolveOwnClubAccesses({ uid, email, clubs, clubApplications, pro
     }
   }));
 
-  // Founder email still unlocks manage UI if coreMembers was never written (legacy clubs).
+  // Legacy clubs may predate coreMembers. Backfill a roster document rather than granting
+  // access off club.founderEmail alone, which would be a standing grant nothing can revoke.
   for (const club of clubs || []) {
     const founder = String(club.founderEmail || "").trim().toLowerCase();
     if (!founder || founder !== emailKey) continue;
     if (seen.has(club.id)) continue;
-    seen.add(club.id);
-    memberDocs.push({
-      club,
-      member: {
+
+    const memberRef = doc(db, "clubs", club.id, "coreMembers", emailKey);
+    try {
+      const snap = await getDoc(memberRef);
+      // Membership was explicitly removed/revoked — respect that, do not re-grant.
+      if (snap.exists()) continue;
+      const member = {
+        uid: uid || "",
         email: emailKey,
-        name: club.founderName || profile.name || emailKey,
+        name: club.founderName || profile.name || emailKey.split("@")[0],
         role: "founder",
         status: "approved",
-        uid,
-      },
-    });
+        permanent: true,
+        backfilledFromFounderEmail: true,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+      await setDoc(memberRef, member, { merge: true });
+      seen.add(club.id);
+      memberDocs.push({ club, member: { ...member, id: emailKey } });
+    } catch (error) {
+      console.warn("[RVU] Could not backfill founder membership for club", club.id, error);
+    }
   }
 
   return memberDocs;
@@ -470,10 +507,20 @@ async function ensureCoreMembersFromApprovedApps(clubId) {
 }
 
 async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
+  beginLoadErrorCapture();
+  const feedQuery = async (label, q) => {
+    try {
+      return await getDocs(q);
+    } catch (error) {
+      if (error?.code !== "permission-denied") console.warn(`RVU Connect could not load ${label}:`, error);
+      _loadErrors.push({ label, code: error?.code || "unknown", message: error?.message || String(error) });
+      return { docs: [] };
+    }
+  };
   const [eventsSnap, announcementsSnap, projectsSnap] = await Promise.all([
-    getDocs(query(collection(db, "events"), where("status", "==", "published"), orderBy("createdAt", "desc"), limit(20))).catch(() => ({ docs: [] })),
-    getDocs(query(collection(db, "announcements"), where("status", "==", "published"), orderBy("createdAt", "desc"), limit(20))).catch(() => ({ docs: [] })),
-    getDocs(query(collection(db, "projects"), orderBy("createdAt", "desc"), limit(20))).catch(() => ({ docs: [] })),
+    feedQuery("events", query(collection(db, "events"), where("status", "==", "published"), orderBy("createdAt", "desc"), limit(20))),
+    feedQuery("announcements", query(collection(db, "announcements"), where("status", "==", "published"), orderBy("createdAt", "desc"), limit(20))),
+    feedQuery("projects", query(collection(db, "projects"), orderBy("createdAt", "desc"), limit(20))),
   ]);
 
   lastDocs.events = eventsSnap.docs[eventsSnap.docs.length - 1] || null;
@@ -485,42 +532,17 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
     rowsOrEmpty("site settings", getDocs(collection(db, "siteSettings"))),
   ]);
 
+  cachePlatformSettings(settingsRows);
+
   const announcementRows = rows(announcementsSnap).filter((item) => !isAnnouncementExpired(item));
 
-  // Mark / purge events past their date+time (registration/event window set at create).
-  const liveEventRows = [];
-  for (const event of rows(eventsSnap)) {
-    if (!isEventExpired(event)) {
-      liveEventRows.push({ ...event, past: false });
-      continue;
-    }
-    const canPurge = Boolean(
-      auth.currentUser
-      && (superAdmin || event.createdBy === auth.currentUser.uid)
-    );
-    if (canPurge) {
-      // Silent purge — avoid permission-trace noise when rules reject a delete.
-      await deleteDoc(doc(db, "events", event.id)).catch(() => {});
-    }
-  }
+  // FILTER ONLY — never delete here. Deleting on read destroys campus history as a side
+  // effect of loading the feed. Purging belongs in an explicit admin action.
+  const liveEventRows = rows(eventsSnap)
+    .filter((event) => !isEventExpired(event))
+    .map((event) => ({ ...event, past: false }));
 
-  // Hide projects whose expiry date has passed (end of that calendar day).
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const liveProjectRows = [];
-  for (const project of rows(projectsSnap)) {
-    const expiry = String(project.expiry || "").trim();
-    if (/^\d{4}-\d{2}-\d{2}$/.test(expiry)) {
-      const expiryDate = new Date(`${expiry}T23:59:59`);
-      if (!Number.isNaN(expiryDate.getTime()) && expiryDate.getTime() < Date.now()) {
-        if (auth.currentUser && (superAdmin || project.createdBy === auth.currentUser.uid || project.ownerId === auth.currentUser.uid)) {
-          await deleteDoc(doc(db, "projects", project.id)).catch(() => {});
-        }
-        continue;
-      }
-    }
-    liveProjectRows.push(project);
-  }
+  const liveProjectRows = rows(projectsSnap).filter((project) => !isProjectExpired(project));
 
   const data = {
     clubs: clubsRows,
@@ -548,10 +570,9 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
   if (auth.currentUser?.email) {
     const email = auth.currentUser.email.trim().toLowerCase();
     const uid = auth.currentUser.uid;
-    const [savedRows, followRows, rsvpRows, clubAppRows] = await Promise.all([
+    const [savedRows, followRows, clubAppRows] = await Promise.all([
       rowsOrEmpty("saved items", getDocs(query(collection(db, "users", uid, "savedItems"), limit(50)))),
       rowsOrEmpty("followed clubs", getDocs(query(collection(db, "users", uid, "followedClubs"), limit(50)))),
-      rowsOrEmpty("event RSVPs", getDocs(query(collection(db, "users", uid, "rsvps"), limit(50)))),
       rowsOrEmpty("club applications", getDocs(query(collection(db, "clubApplications"), where("uid", "==", uid), limit(20)))),
     ]);
     const ownHostRequests = await rowsOrEmpty("host requests", getDocs(query(collection(db, "hostRequests"), where("uid", "==", uid), limit(50))));
@@ -669,20 +690,24 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
     data.hostRequests = ownHostRequests;
     data.savedItems = savedRows;
     data.followedClubs = followRows;
-    data.rsvps = rsvpRows;
     data.clubApplications = clubAppRows;
   }
 
   if (superAdmin) {
     // Only load basic admin context initially, not everything.
-    const [allClubRows, allSchoolRows] = await Promise.all([
+
+    const [allClubRows, allSchoolRows, flagRows] = await Promise.all([
       rowsOrEmpty("all clubs", getDocs(query(collection(db, "clubs"), limit(100)))),
       rowsOrEmpty("all schools", getDocs(query(collection(db, "schools"), limit(100)))),
+      // Unordered on purpose: an orderBy would hide flags written without createdAt. Sorted below.
+      rowsOrEmpty("moderation flags", getDocs(query(collection(db, "moderationFlags"), limit(ADMIN_PAGE_SIZE)))),
     ]);
     data.allClubs = allClubRows;
     data.allSchools = allSchoolRows;
+    data.moderationFlags = sortByCreatedAtDesc(flagRows);
   }
 
+  data.loadErrors = collectedLoadErrors();
   return data;
 }
 
@@ -780,6 +805,13 @@ function isEventExpired(event) {
   if (!/^\d{1,2}:\d{2}:\d{2}$/.test(timeStr)) timeStr = "23:59:00";
   const dt = new Date(`${dateStr}T${timeStr}`);
   return !Number.isNaN(dt.getTime()) && dt.getTime() < Date.now();
+}
+
+function isProjectExpired(project) {
+  const expiry = String(project?.expiry || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(expiry)) return false;
+  const expiryDate = new Date(`${expiry}T23:59:59`);
+  return !Number.isNaN(expiryDate.getTime()) && expiryDate.getTime() < Date.now();
 }
 
 function isAnnouncementExpired(item) {
@@ -888,12 +920,25 @@ async function submitNewClubCreationRequest(clubDraft) {
   return docId;
 }
 
+/** Pick a free club id. Ids derive from the club name, so same-named requests must not collide. */
+async function resolveFreeClubId(baseId, founderEmail) {
+  for (let attempt = 0; attempt < 25; attempt += 1) {
+    const candidate = attempt === 0 ? baseId : `${baseId}-${attempt + 1}`;
+    const snap = await getDoc(doc(db, "clubs", candidate));
+    if (!snap.exists()) return candidate;
+    const existingFounder = String(snap.data()?.founderEmail || "").trim().toLowerCase();
+    if (founderEmail && existingFounder === founderEmail) return candidate;
+  }
+  throw new Error(`Too many clubs already named like "${baseId}". Rename the club and resubmit.`);
+}
+
 async function applyNewClubApproval(requestData) {
   const memberEmail = requestData.email || requestData.founderEmail;
   const normalizedEmail = memberEmail?.trim().toLowerCase();
-  const clubId = requestData.clubId
+  const baseClubId = requestData.clubId
     || (requestData.clubName ? slugifyClubName(requestData.clubName) : null);
-  if (!clubId) throw new Error("New club request is missing a club name/id.");
+  if (!baseClubId) throw new Error("New club request is missing a club name/id.");
+  const clubId = await resolveFreeClubId(baseClubId, normalizedEmail);
 
   await tracedSetDoc(doc(db, "clubs", clubId), {
     name: requestData.clubName || clubId,
@@ -950,6 +995,59 @@ async function updateClubRegistration(clubId, registrationOpen) {
   });
 }
 
+/**
+ * Clear the standing grants approval wrote, so a rejection actually takes effect: the canonical
+ * schoolRepresentative_{uid} request, the sticky users flags, and the coreMembers roster doc.
+ */
+async function revokeHostGrants(requestData = {}) {
+  const uid = requestData.uid;
+  const normalizedEmail = String(requestData.email || requestData.founderEmail || "").trim().toLowerCase();
+
+  if (requestData.type === "schoolRepresentative" && uid) {
+    const canonicalId = `schoolRepresentative_${uid}`;
+    await tracedSetDoc(doc(db, "hostRequests", canonicalId), {
+      status: "rejected",
+      updatedAt: serverTimestamp(),
+    }, { merge: true }).catch((error) => console.warn("[RVU] Could not revoke canonical school-rep request", error));
+
+    await tracedUpdateDoc(doc(db, "users", uid), {
+      schoolRepApproved: deleteField(),
+      updatedAt: serverTimestamp(),
+    }).catch((error) => console.warn("[RVU] Could not clear schoolRepApproved", error));
+
+    if (requestData.schoolId) {
+      await tracedDeleteDoc(doc(db, "schools", requestData.schoolId, "representatives", normalizedEmail || uid))
+        .catch(() => { /* representative doc may not exist */ });
+    }
+  }
+
+  if (requestData.type === "clubCore" && requestData.clubId) {
+    if (normalizedEmail) {
+      await tracedDeleteDoc(doc(db, "clubs", requestData.clubId, "coreMembers", normalizedEmail))
+        .catch(() => { /* roster doc may not exist */ });
+    }
+    if (uid) await demoteClubApplication(requestData.clubId, uid, "revoked");
+    if (uid) {
+      await tracedUpdateDoc(doc(db, "users", uid), {
+        clubCoreApproved: deleteField(),
+        updatedAt: serverTimestamp(),
+      }).catch((error) => console.warn("[RVU] Could not clear clubCoreApproved", error));
+    }
+  }
+
+  if (uid) {
+    try {
+      const snap = await getDoc(doc(db, "users", uid));
+      const data = snap.exists() ? (snap.data() || {}) : {};
+      if (!data.schoolRepApproved && !data.clubCoreApproved && data.role !== "superAdmin") {
+        await tracedUpdateDoc(doc(db, "users", uid), { role: "student", updatedAt: serverTimestamp() });
+      }
+    } catch (error) {
+      console.warn("[RVU] Could not reset role after revocation", error);
+    }
+  }
+}
+
 async function updateHostRequestStatus(requestId, status) {
   requireOneOf(status, ["approved", "rejected"], "Host request status");
   const requestRef = doc(db, "hostRequests", requestId);
@@ -961,6 +1059,12 @@ async function updateHostRequestStatus(requestId, status) {
     status,
     updatedAt: serverTimestamp()
   }, { merge: true });
+
+  // The sticky grants are what firestore.rules trust, so a rejection must clear them.
+  if (status === "rejected") {
+    await revokeHostGrants(requestData);
+    return;
+  }
 
   if (status !== "approved") return;
 
@@ -1018,35 +1122,71 @@ async function updateHostRequestStatus(requestId, status) {
   }
 }
 
+// Enforcement for the siteSettings/platform controls. Cached by loadCampusData.
+let _platformSettings = { bannedWords: [], reviewRequired: false };
+
+function cachePlatformSettings(settingsRows) {
+  const platform = (settingsRows || []).find((s) => s.id === "platform") || {};
+  _platformSettings = {
+    bannedWords: Array.isArray(platform.bannedWords) ? platform.bannedWords : [],
+    reviewRequired: Boolean(platform.reviewRequired),
+  };
+}
+
+/** Throw when user-authored text contains a banned word (whole-word, case-insensitive). */
+function assertNoBannedWords(payload, fields = ["title", "description"]) {
+  const words = (_platformSettings.bannedWords || [])
+    .map((w) => String(w || "").trim().toLowerCase())
+    .filter(Boolean);
+  if (!words.length) return;
+  const haystack = fields.map((f) => String(payload?.[f] || "")).join(" ").toLowerCase();
+  const hit = words.find((word) => new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(haystack));
+  if (hit) throw new Error(`"${hit}" is not allowed in campus content. Please reword and try again.`);
+}
+
+/** Draft when reviewRequired is on, so an admin must publish. Super admins bypass the queue. */
+async function resolvePublishStatus(requested) {
+  const wanted = requested || "published";
+  if (wanted !== "published") return wanted;
+  if (!_platformSettings.reviewRequired) return wanted;
+  if (await hasSuperAdminGrant(auth.currentUser)) return wanted;
+  return "draft";
+}
+
 async function createEvent(payload) {
   if (payload?.hostType === "school") {
     await assertCanCreateSchoolContent();
   }
+  assertNoBannedWords(payload);
+  const status = await resolvePublishStatus(payload.status);
   const ref = await tracedAddDoc(collection(db, "events"), {
     ...payload,
-    status: payload.status || "published",
+    status,
     createdBy: auth.currentUser?.uid,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
-  return { id: ref.id, ...payload, createdAt: new Date().toISOString() };
+  return { id: ref.id, ...payload, status, createdAt: new Date().toISOString() };
 }
 
 async function createAnnouncement(payload) {
   if (payload?.sourceType === "school") {
     await assertCanCreateSchoolContent();
   }
+  assertNoBannedWords(payload);
+  const status = await resolvePublishStatus(payload.status);
   const ref = await tracedAddDoc(collection(db, "announcements"), {
     ...payload,
-    status: payload.status || "published",
+    status,
     createdBy: auth.currentUser?.uid,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
-  return { id: ref.id, ...payload, createdAt: new Date().toISOString() };
+  return { id: ref.id, ...payload, status, createdAt: new Date().toISOString() };
 }
 
 async function createProject(payload) {
+  assertNoBannedWords(payload);
   const status = requireOneOf(payload.status || "open", ["open", "closed"], "Project status");
   const ref = await tracedAddDoc(collection(db, "projects"), {
     ...payload,
@@ -1063,10 +1203,13 @@ async function createProject(payload) {
 
 async function updateUserRole(uid, role) {
   requireOneOf(role, ["student", "clubCore", "schoolRepresentative", "superAdmin"], "User role");
-  await tracedUpdateDoc(doc(db, "users", uid), {
-    role,
-    updatedAt: serverTimestamp(),
-  });
+  const patch = { role, updatedAt: serverTimestamp() };
+  // Clear the sticky grants too, or the user keeps publishing rights while displaying as a student.
+  if (role === "student") {
+    patch.schoolRepApproved = deleteField();
+    patch.clubCoreApproved = deleteField();
+  }
+  await tracedUpdateDoc(doc(db, "users", uid), patch);
 }
 
 async function createClub(payload) {
@@ -1119,7 +1262,6 @@ async function createSchool(payload) {
   return ref.id;
 }
 
-
 async function grantPlatformRole({ email, uid, role }) {
   const normalizedEmail = email?.trim();
   if (!uid) throw new Error("A Firebase Auth UID is required for user role updates.");
@@ -1137,11 +1279,25 @@ async function grantPlatformRole({ email, uid, role }) {
   }
   
   if (role === "student") {
-    await tracedDeleteDoc(doc(db, "superAdmins", uid));
+    await tracedDeleteDoc(doc(db, "superAdmins", uid)).catch(() => { /* may not exist */ });
     await updateUserRole(uid, "student");
     return;
   }
-  
+
+  // A bare users.role write grants nothing: access comes from the coreMembers roster or the
+  // schoolRepApproved flag. Refuse scoped roles here rather than create a half-granted user.
+  if (role === "clubCore") {
+    throw new Error(
+      "Club core is granted per club. Use Clubs → Manage core team to add this member to a specific club."
+    );
+  }
+
+  if (role === "schoolRepresentative") {
+    throw new Error(
+      "School representative is granted by approving the user's School Rep request under Host Requests, which records the school scope."
+    );
+  }
+
   await updateUserRole(uid, role || "student");
 }
 
@@ -1170,9 +1326,35 @@ async function listClubCoreMembers(clubId) {
   return rows(snap).filter((m) => (m.status || "approved") === "approved");
 }
 
+/** Remove another member from a club's core team. Demotes their grant too — see leaveClubCore. */
 async function removeClubCoreRole(clubId, email) {
   const normalizedEmail = email.trim().toLowerCase();
-  await tracedDeleteDoc(doc(db, "clubs", clubId, "coreMembers", normalizedEmail));
+  const memberRef = doc(db, "clubs", clubId, "coreMembers", normalizedEmail);
+  let memberUid = "";
+  try {
+    const snap = await getDoc(memberRef);
+    memberUid = snap.exists() ? (snap.data()?.uid || "") : "";
+  } catch (_) { /* fall through to the delete */ }
+
+  if (memberUid) {
+    await demoteClubApplication(clubId, memberUid, "revoked");
+  } else {
+    try {
+      const byEmail = await getDocs(query(
+        collection(db, "clubApplications"),
+        where("clubId", "==", clubId),
+        where("email", "==", normalizedEmail),
+        where("status", "==", "approved"),
+        limit(10)
+      ));
+      await Promise.all(byEmail.docs.map((row) =>
+        updateDoc(row.ref, { status: "revoked", revokedAt: serverTimestamp(), updatedAt: serverTimestamp() }).catch(() => {})
+      ));
+    } catch (error) {
+      console.warn("[RVU] Could not demote club application by email", normalizedEmail, error);
+    }
+  }
+  await tracedDeleteDoc(memberRef);
 }
 
 async function updateClubLeadership(clubId, data) {
@@ -1236,6 +1418,9 @@ async function updateSiteSetting(settingId, data) {
     updatedBy: auth.currentUser?.uid,
     updatedAt: serverTimestamp(),
   }, { merge: true });
+  if (settingId === "platform") {
+    cachePlatformSettings([{ id: "platform", ..._platformSettings, ...data }]);
+  }
 }
 
 async function createContentReview(payload) {
@@ -1292,12 +1477,46 @@ async function unfollowClub(clubId) {
   await tracedDeleteDoc(ref);
 }
 
+/**
+ * Revoke the caller's own club-core membership.
+ * Must demote the approved clubApplication too — it is the standing grant the self-heal paths
+ * read from, so deleting only the roster doc lets the membership come straight back.
+ */
 async function leaveClubCore(clubId) {
   const user = auth.currentUser;
   if (!user?.email) throw new Error("Sign in first.");
   if (!clubId) throw new Error("Club id required.");
   const email = user.email.trim().toLowerCase();
+  await demoteClubApplication(clubId, user.uid, "withdrawn");
   await tracedDeleteDoc(doc(db, "clubs", clubId, "coreMembers", email));
+}
+
+/** Mark the standing club-core grant not-approved so the self-heal paths ignore it. */
+async function demoteClubApplication(clubId, uid, status) {
+  if (!clubId || !uid) return;
+  const ref = doc(db, "clubApplications", `${clubId}_${uid}`);
+  try {
+    const snap = await getDoc(ref);
+    if (snap.exists()) {
+      await updateDoc(ref, { status, revokedAt: serverTimestamp(), updatedAt: serverTimestamp() });
+    }
+  } catch (error) {
+    console.warn("[RVU] Could not demote club application", `${clubId}_${uid}`, error);
+  }
+  try {
+    const legacy = await getDocs(query(
+      collection(db, "clubApplications"),
+      where("uid", "==", uid),
+      where("clubId", "==", clubId),
+      where("status", "==", "approved"),
+      limit(10)
+    ));
+    await Promise.all(legacy.docs.map((row) =>
+      updateDoc(row.ref, { status, revokedAt: serverTimestamp(), updatedAt: serverTimestamp() }).catch(() => {})
+    ));
+  } catch (_) {
+    /* deterministic doc above is the one the heal paths read */
+  }
 }
 
 async function flagContent(payload) {
@@ -1312,16 +1531,6 @@ async function flagContent(payload) {
     updatedAt: serverTimestamp(),
   });
   return ref.id;
-}
-
-async function getEventRSVPs(eventId) {
-  const snap = await getDocs(collection(db, "events", eventId, "rsvps"));
-  return rows(snap);
-}
-
-async function getProjectApplicants(projectId) {
-  const snap = await getDocs(collection(db, "projects", projectId, "applications"));
-  return rows(snap);
 }
 
 // ── Club Application functions ──
@@ -1466,7 +1675,6 @@ async function rejectClubApplication(applicationId) {
   });
 }
 
-
 async function loadAllPendingClubApplications() {
   const snap = await getDocs(query(
     collection(db, "clubApplications"),
@@ -1561,10 +1769,15 @@ async function loadMore(collectionName) {
   } else if (collectionName === "projects" && lastDocs.projects) {
     q = query(collection(db, "projects"), orderBy("createdAt", "desc"), startAfter(lastDocs.projects), limit(20));
   } else {
-    return [];
+    return { items: [], exhausted: true, fetched: 0, error: null };
   }
 
-  const snap = await getDocs(q).catch(() => ({ docs: [] }));
+  let snap;
+  try {
+    snap = await getDocs(q);
+  } catch (error) {
+    return { items: [], exhausted: false, error: handleFirebaseError(error, "Could not load more") };
+  }
   if (snap.docs.length > 0) {
     lastDocs[collectionName] = snap.docs[snap.docs.length - 1];
   }
@@ -1575,7 +1788,16 @@ async function loadMore(collectionName) {
   if (collectionName === "events") {
     result = result.filter((item) => !isEventExpired(item)).map((item) => ({ ...item, past: false }));
   }
-  return result;
+  if (collectionName === "projects") {
+    result = result.filter((item) => !isProjectExpired(item));
+  }
+  // A fully-filtered-out page is not exhaustion — saying so hides records further down.
+  return {
+    items: result,
+    exhausted: snap.docs.length === 0,
+    fetched: snap.docs.length,
+    error: null,
+  };
 }
 
 async function loadAdminTab(tabName, lastDocId = null) {
@@ -1583,29 +1805,48 @@ async function loadAdminTab(tabName, lastDocId = null) {
   
   const map = {
     requests: "hostRequests",
+    // Both spellings are in use across the two consoles; an unmapped key returns zero rows.
     flags: "moderationFlags",
+    moderation: "moderationFlags",
     users: "users",
     events: "events",
     announcements: "announcements",
     contentReviews: "contentReviews",
-    review: "contentReviews"
+    review: "contentReviews",
+    reviews: "contentReviews",
+    clubs: "clubs",
+    schools: "schools",
+    projects: "projects",
   };
-  
-  const colName = map[tabName];
-  if (!colName) return { docs: [], lastDocId: null };
 
-  let q = query(collection(db, colName), limit(50));
-  if (lastDocId) {
-    const docSnap = await getDoc(doc(db, colName, lastDocId));
-    if (docSnap.exists()) {
-      q = query(collection(db, colName), startAfter(docSnap), limit(50));
-    }
+  const colName = map[tabName];
+  if (!colName) {
+    console.warn("[RVU] loadAdminTab called with unknown tab", tabName);
+    return { docs: [], lastDocId: null, error: `Unknown admin tab "${tabName}".` };
   }
-  
-  const snap = await getDocs(q).catch(() => ({ docs: [] }));
-  return { 
-    docs: rows(snap), 
-    lastDocId: snap.docs.length > 0 ? snap.docs[snap.docs.length - 1].id : null 
+
+  // Deliberately NOT orderBy("createdAt"): Firestore drops documents missing the ordered
+  // field, which would hide legacy records from the admin, and a try/catch cannot detect it.
+  // Page on document id so everything is reachable; sort for display only.
+  let cursor = null;
+  if (lastDocId) {
+    const docSnap = await getDoc(doc(db, colName, lastDocId)).catch(() => null);
+    if (docSnap?.exists()) cursor = docSnap;
+  }
+
+  let snap;
+  try {
+    const clauses = cursor ? [startAfter(cursor), limit(ADMIN_PAGE_SIZE)] : [limit(ADMIN_PAGE_SIZE)];
+    snap = await getDocs(query(collection(db, colName), ...clauses));
+  } catch (error) {
+    return { docs: [], lastDocId: null, error: handleFirebaseError(error, `Could not load ${colName}`) };
+  }
+
+  return {
+    // Cursor stays on document id (the query's real order); only display order is by date.
+    docs: sortByCreatedAtDesc(rows(snap)),
+    lastDocId: snap.docs.length > 0 ? snap.docs[snap.docs.length - 1].id : null,
+    hasMore: snap.docs.length === ADMIN_PAGE_SIZE,
   };
 }
 
@@ -1651,6 +1892,7 @@ window.RVUFirebase = {
   approveClubApplication,
   rejectClubApplication,
   isEventExpired,
+  isProjectExpired,
   isAnnouncementExpired,
   unfollowClub,
   updateAnnouncementStatus,
@@ -1665,8 +1907,6 @@ window.RVUFirebase = {
   updateSiteSetting,
   updateUserRole,
   removeClubCoreRole,
-  getEventRSVPs,
-  getProjectApplicants,
   signOut: () => {
     _cachedSuperAdminResult = null;
     return signOut(auth);

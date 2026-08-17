@@ -54,7 +54,10 @@ export const state = {
   loginOpen: false,
   hostRequests: [],
   moderationFlags: [],
-  onboardingStep: "role",
+  // Never default to a step. syncFirebaseData() renders once before the profile has loaded, so
+  // defaulting to "role" flashed the onboarding modal at every returning user on every login.
+  // applyOnboardingState() raises this only for accounts with no history at all.
+  onboardingStep: null,
   role: null,
   createOpen: false,
   selectedClubSlug: null,
@@ -102,6 +105,8 @@ export const state = {
     clubCategory: "All",
     clubSchool: "All",
     announcementType: "All",
+    // Must be declared — the change handler only assigns filters already on this object.
+    announcementTag: "All",
     projectTag: "All",
   },
   allUsers: [],
@@ -109,10 +114,15 @@ export const state = {
   allAnnouncements: [],
   allClubs: [],
   allSchools: [],
+  contentReviews: [],
   savedItems: [],
   followedClubs: [],
   rsvps: [],
+  // Read unguarded by the Home page — a missing default blanks the whole app.
+  myApplications: [],
   siteSettings: [],
+  loadErrors: [],
+  _adminTabsLoaded: {},
   // Club Core applications (student's own)
   clubApplications: [],
   // Pending applicants for the active club (club-core view)
@@ -120,11 +130,14 @@ export const state = {
   _clubApplicantsLoaded: false,
   // Modal flags
   _clubApplyModalOpen: false,
+  _clubApplicantsLoading: false,
   editClubOpen: false,
   editClubId: null,
   clubCoreMembers: [],
   _clubCoreMembersLoading: false,
-  editClubId: null,
+  _loadedClubCoreFor: null,
+  _hasClubCore: false,
+  _hasSchoolRep: false,
 };
 
 export const app = document.querySelector("#app");

@@ -5,8 +5,20 @@ import { validateEvent, validateAnnouncement, validateProject } from "./validati
 import { promptUser, validateClubDraft, replaceCollection } from './utils.js';
 import { schools, interests, events, clubs, announcements, projects, state, defaultClubDraft, app } from './state.js';
 import { isClubCore, isSchoolRep, isSuperAdmin, canHost, canManageClub, canManageEvent, activeClub, isAllowedRvuEmail, syncFirebaseData, softRefreshCampusData, startPendingAccessPolling, enterAuthenticatedApp, enterDemoApp, handleSignOut, startFirebaseLogin } from './auth.js';
-import { render, renderAtTop, renderSearchResultsHtml } from './ui.js';
+import { render, renderAtTop, renderSearchResultsHtml, isSchoolAnnouncement } from './ui.js';
 import { navigate, initRouter } from './router.js';
+
+/** True when a YYYY-MM-DD date plus HH:MM time is still ahead of now. */
+function isFutureDateTime(date, time) {
+  const dateStr = String(date || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return true; // let the field validator complain
+  let timeStr = String(time || "23:59").trim();
+  if (/^\d{1,2}:\d{2}$/.test(timeStr)) timeStr = `${timeStr}:00`;
+  if (!/^\d{1,2}:\d{2}:\d{2}$/.test(timeStr)) timeStr = "23:59:00";
+  const dt = new Date(`${dateStr}T${timeStr}`);
+  if (Number.isNaN(dt.getTime())) return true;
+  return dt.getTime() > Date.now();
+}
 
 export function bindEvents() {
   if (!window.rvuAuthListenersBound) {
@@ -298,6 +310,18 @@ export async function handleAction(action, dataset) {
   if (action === "back-to-host-info") {
     state.onboardingStep = "host-info";
     renderAtTop();
+    return;
+  }
+  // Every onboarding step needs a way back, or the host path is a dead end.
+  if (action === "back-to-role") {
+    state.onboardingStep = "role";
+    renderAtTop();
+    return;
+  }
+  if (action === "back-to-student-info") {
+    state.onboardingStep = "student-info";
+    renderAtTop();
+    return;
   }
   if (action === "submit-new-club") {
     if (!state.clubDraft.name || !state.clubDraft.category) {
@@ -329,14 +353,26 @@ export async function handleAction(action, dataset) {
           roleTitle: state.host.roleTitle,
         });
       } catch (error) {
-        window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: error.message || "Could not submit application.", type: "error" } }));
-        return;
+        // "Already pending" means the request is in — treat it as success, not an error the
+        // user must resolve, or onboarding can never be satisfied.
+        const message = error.message || "";
+        const alreadySubmitted = /already have a pending application|already approved|already club core/i.test(message);
+        if (!alreadySubmitted) {
+          window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: message || "Could not submit application.", type: "error" } }));
+          return;
+        }
+        window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Your application is already in review.", type: "info" } }));
       }
+    }
+    if (window.RVUFirebase && state.authUser) {
+      window.RVUFirebase.saveUserProfile(state.authUser.uid, { onboardingComplete: true })
+        .catch((error) => console.warn("[RVU] Could not persist onboardingComplete", error));
     }
     state.host.approved = false;
     state.onboardingStep = "host-review";
     startPendingAccessPolling();
     navigate("home");
+    return;
   }
   if (action === "host-review") {
     state.onboardingStep = "host-review";
@@ -377,25 +413,15 @@ export async function handleAction(action, dataset) {
     return;
   }
   if (action === "open-club") {
+    // renderCurrentRoute already loads the core team, including for deep links and reloads.
     navigate("clubs", { clubSlug: dataset.club });
-    if (window.RVUFirebase && dataset.club) {
-      state._clubCoreMembersLoading = true;
-      state.clubCoreMembers = [];
-      window.RVUFirebase.listClubCoreMembers(dataset.club).then((members) => {
-        state.clubCoreMembers = members || [];
-        state._clubCoreMembersLoading = false;
-        renderAtTop();
-      }).catch(() => {
-        state.clubCoreMembers = [];
-        state._clubCoreMembersLoading = false;
-        renderAtTop();
-      });
-    }
+    return;
   }
   if (action === "back-to-clubs") {
-    state.selectedClubSlug = null;
     state.clubCoreMembers = [];
     state._loadedClubCoreFor = null;
+    navigate("clubs");
+    return;
   }
   if (action === "toggle-registration") {
     const club = clubs.find((item) => item.slug === dataset.club);
@@ -619,7 +645,6 @@ export async function handleAction(action, dataset) {
       tag: await promptUser("Tag") || "Notice",
       type: "School",
       sourceType: "admin",
-      time: "Just now",
       status: "published",
     });
     announcements.unshift(newAnn);
@@ -697,6 +722,11 @@ export async function handleAction(action, dataset) {
       window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Poster URL must start with http:// or https://", type: "info" } }));
       return;
     }
+    // A past event is filtered out of every listing — it would look published but be invisible.
+    if (!isFutureDateTime(date, time)) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Event date and time must be in the future.", type: "info" } }));
+      return;
+    }
     const collab = document.getElementById("ce-collab")?.value || "";
     const registrationDeadlineRaw = document.getElementById("ce-reg-deadline")?.value || "";
     const registrationDeadline = registrationDeadlineRaw
@@ -742,6 +772,11 @@ export async function handleAction(action, dataset) {
       if (state.allEvents) state.allEvents.unshift(newEvent);
       state.createEventOpen = false;
       renderAtTop();
+      window.dispatchEvent(new CustomEvent("rvu-toast", {
+        detail: newEvent.status === "draft"
+          ? { message: "Event submitted for admin review before it goes live.", type: "info" }
+          : { message: "Event published.", type: "success" },
+      }));
     } catch (e) {
       window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: e.message || "Could not create event.", type: "error" } }));
     }
@@ -777,7 +812,6 @@ export async function handleAction(action, dataset) {
       title,
       description,
       tag,
-      time: "Just now",
       status: "published",
     };
     
@@ -822,6 +856,11 @@ export async function handleAction(action, dataset) {
       if (state.allAnnouncements) state.allAnnouncements.unshift(newAnn);
       state.createAnnouncementOpen = false;
       renderAtTop();
+      window.dispatchEvent(new CustomEvent("rvu-toast", {
+        detail: newAnn.status === "draft"
+          ? { message: "Announcement submitted for admin review before it goes live.", type: "info" }
+          : { message: "Announcement published.", type: "success" },
+      }));
     } catch (e) {
       window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: e.message || "Could not create announcement.", type: "error" } }));
     }
@@ -897,13 +936,22 @@ export async function handleAction(action, dataset) {
     renderAtTop();
   }
 
-
   if (action === "load-more") {
     if (!window.RVUFirebase) return;
     const collectionName = dataset.collection;
-    const newItems = await window.RVUFirebase.loadMore(collectionName);
-    if (newItems.length === 0) {
-      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "No more items to load.", type: "info" } }));
+    const result = await window.RVUFirebase.loadMore(collectionName);
+    // Three distinct outcomes: failed, exhausted, or a page that filtered out entirely.
+    if (result.error) return; // handleFirebaseError already surfaced a toast
+    const newItems = result.items || [];
+    if (!newItems.length) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", {
+        detail: {
+          message: result.exhausted
+            ? "No more items to load."
+            : "Nothing new to show — the next items have expired. Tap again to keep looking.",
+          type: "info",
+        },
+      }));
       return;
     }
     if (collectionName === "events") replaceCollection(events, [...events, ...newItems]);
@@ -968,34 +1016,30 @@ export async function handleAction(action, dataset) {
     renderAtTop();
     return;
   }
+  // Detail views must go through navigate() for a URL and a history entry — otherwise they
+  // are not shareable and Back skips the list.
   if (action === "open-project-detail") {
-    state.selectedProjectId = dataset.docid;
-    renderAtTop();
+    navigate("projects", { projectId: dataset.docid });
     return;
   }
   if (action === "close-project-detail") {
-    state.selectedProjectId = null;
-    renderAtTop();
-    return;
-  }
-  if (action === "close-event-detail") {
-    state.selectedEventId = null;
-    renderAtTop();
+    navigate("projects");
     return;
   }
   if (action === "open-event-detail") {
-    state.selectedEventId = dataset.docid;
-    renderAtTop();
+    navigate("events", { eventId: dataset.docid });
+    return;
+  }
+  if (action === "close-event-detail") {
+    navigate("events");
     return;
   }
   if (action === "open-announcement-detail") {
-    state.selectedAnnouncementId = dataset.docid;
-    renderAtTop();
+    navigate("announcements", { announcementId: dataset.docid });
     return;
   }
   if (action === "close-announcement-detail") {
-    state.selectedAnnouncementId = null;
-    renderAtTop();
+    navigate("announcements");
     return;
   }
   if (action === "edit-announcement") {
@@ -1031,7 +1075,10 @@ export async function handleAction(action, dataset) {
       imageUrl: imageUrl || null,
     };
     if (tag) patch.tag = tag;
-    if (school) {
+    // Guard the write as well as the picker, so a stale DOM node cannot reassign a club
+    // announcement to a school.
+    const existing = announcements.find((a) => a.id === state.editAnnouncementId);
+    if (school && isSchoolAnnouncement(existing)) {
       patch.schoolId = school;
       patch.schoolName = school;
       patch.source = school;
@@ -1295,6 +1342,11 @@ export async function handleAction(action, dataset) {
     return;
   }
   if (action === "ep-year") {
+    // This re-renders the whole app, so capture the open fields or they are discarded.
+    const typedName = document.getElementById("ep-name")?.value;
+    const typedSchool = document.getElementById("ep-school")?.value;
+    if (typedName !== undefined && typedName !== null) state.user.name = typedName;
+    if (typedSchool) state.user.school = typedSchool;
     state.user.year = dataset.year;
     renderAtTop();
     return;
@@ -1425,7 +1477,6 @@ export async function handleAction(action, dataset) {
     return;
   }
 
-
   if (action === "load-club-applicants") {
     if (!window.RVUFirebase) return;
     let clubIds = dataset.club
@@ -1490,7 +1541,14 @@ export async function handleAction(action, dataset) {
     return;
   }
   if (action === "open-external-link") {
-    if (dataset.url) window.open(dataset.url, "_blank", "noopener,noreferrer");
+    // http(s) only — window.open() will execute a javascript: URL in the current document.
+    const url = String(dataset.url || "").trim();
+    if (!url) return;
+    if (!/^https?:\/\//i.test(url)) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "That link is not a valid web address.", type: "error" } }));
+      return;
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
     return;
   }
   if (action === "open-edit-club") {

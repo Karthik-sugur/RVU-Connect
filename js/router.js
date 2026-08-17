@@ -2,6 +2,13 @@ import { state } from './state.js';
 import { renderAtTop } from './ui.js';
 import { isClubCore, isSuperAdmin } from './auth.js';
 
+/** Drop the cached load marker so the next render re-reads. No argument invalidates all tabs. */
+export function invalidateAdminTab(tab) {
+  if (!state._adminTabsLoaded) return;
+  if (tab) delete state._adminTabsLoaded[tab];
+  else state._adminTabsLoaded = {};
+}
+
 export function parseRoute() {
   const params = new URLSearchParams(window.location.search);
   const route = params.get("route") || "home";
@@ -74,16 +81,14 @@ export async function renderCurrentRoute() {
 
   if (state.route === "admin" && window.RVUFirebase) {
     const tab = state.adminTab || "requests";
-    // Check if we need to load this tab data
-    let needsLoad = false;
-    if (tab === "requests" && state.hostRequests.length === 0) needsLoad = true;
-    else if (tab === "flags" && state.moderationFlags.length === 0) needsLoad = true;
-    else if (tab === "users" && state.allUsers.length === 0) needsLoad = true;
-    else if (tab === "events" && state.allEvents.length === 0) needsLoad = true;
-    else if (tab === "announcements" && state.allAnnouncements.length === 0) needsLoad = true;
-    else if (tab === "contentReviews" && state.contentReviews.length === 0) needsLoad = true;
-    
+    // Track which tabs were fetched. Keying off "array is empty" re-fetches an empty queue
+    // on every render and never refreshes a stale one. Cleared by invalidateAdminTab().
+    if (!state._adminTabsLoaded) state._adminTabsLoaded = {};
+    const needsLoad = ["requests", "flags", "users", "events", "announcements", "contentReviews"].includes(tab)
+      && !state._adminTabsLoaded[tab];
+
     if (needsLoad) {
+      state._adminTabsLoaded[tab] = true;
       state.dataLoading = true;
       renderAtTop();
       if (tab === "requests") {
@@ -95,7 +100,7 @@ export async function renderCurrentRoute() {
           } catch (_) { /* optional */ }
         }
       }
-      else if (tab === "flags") state.moderationFlags = (await window.RVUFirebase.loadAdminTab(tab)).docs || [];
+      else if (tab === "flags") state.moderationFlags = (await window.RVUFirebase.loadAdminTab("moderation")).docs || [];
       else if (tab === "users") state.allUsers = (await window.RVUFirebase.loadAdminTab(tab)).docs || [];
       else if (tab === "events") state.allEvents = (await window.RVUFirebase.loadAdminTab(tab)).docs || [];
       else if (tab === "announcements") state.allAnnouncements = (await window.RVUFirebase.loadAdminTab(tab)).docs || [];
@@ -131,8 +136,48 @@ export async function renderCurrentRoute() {
   renderAtTop();
 }
 
+/** Overlay flags, outermost-last. Back closes the topmost one before changing route. */
+const OVERLAY_FLAGS = [
+  "searchOpen",
+  "_clubApplyModalOpen",
+  "createEventOpen",
+  "editEventOpen",
+  "createAnnouncementOpen",
+  "editAnnouncementOpen",
+  "createProjectOpen",
+  "editProfileOpen",
+  "editClubOpen",
+  "loginOpen",
+  "createOpen",
+];
+
+function closeTopOverlay() {
+  const open = OVERLAY_FLAGS.find((flag) => state[flag]);
+  if (!open) return false;
+  state[open] = false;
+  return true;
+}
+
+export function anyOverlayOpen() {
+  return OVERLAY_FLAGS.some((flag) => state[flag]);
+}
+
 export function initRouter() {
   window.addEventListener("popstate", (e) => {
+    // Dismiss an overlay rather than mutating the page behind it, which leaves a modal
+    // floating over a different screen with no way out.
+    if (closeTopOverlay()) {
+      // Keep the URL where it was — we consumed this Back for the overlay.
+      window.history.pushState(
+        { route: state.route, eventId: state.selectedEventId, projectId: state.selectedProjectId,
+          announcementId: state.selectedAnnouncementId, clubSlug: state.selectedClubSlug },
+        "",
+        window.location.search
+      );
+      renderAtTop();
+      return;
+    }
+
     if (e.state) {
       state.route = e.state.route || "home";
       state.selectedEventId = e.state.eventId || null;
@@ -145,6 +190,15 @@ export function initRouter() {
     // popstate never pushes new history
     renderCurrentRoute();
   });
-  
+
+  // Escape closes the topmost overlay everywhere in the app.
+  window.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    if (closeTopOverlay()) {
+      e.preventDefault();
+      renderAtTop();
+    }
+  });
+
   parseRoute();
 }

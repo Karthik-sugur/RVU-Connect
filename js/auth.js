@@ -2,6 +2,7 @@ import { replaceCollection } from './utils.js';
 import { schools, interests, events, clubs, announcements, projects, state } from './state.js';
 import { render, renderAtTop } from './ui.js';
 import { applyDemoCampusData } from '../sample-data.js';
+import { EMAIL_DOMAIN } from './constants.js';
 
 export function isClubCore() {
   return Boolean(state._hasClubCore) || state.role === "club-core";
@@ -10,7 +11,6 @@ export function isClubCore() {
 export function isSchoolRep() {
   return Boolean(state._hasSchoolRep) || state.role === "school-rep";
 }
-
 
 export function isSuperAdmin() {
   return state.role === "admin";
@@ -97,11 +97,28 @@ export async function softRefreshCampusData({ showSkeleton = false } = {}) {
 let _pendingAccessPoll = null;
 let _expiryRefreshPoll = null;
 
+/** True when the user is mid-interaction and a full re-render would destroy their work. */
+function hasOpenUserInput() {
+  if (state.createEventOpen || state.editEventOpen || state.createAnnouncementOpen
+    || state.editAnnouncementOpen || state.createProjectOpen || state.editProfileOpen
+    || state.editClubOpen || state.createOpen || state.searchOpen || state.loginOpen
+    || state.onboardingStep || state._clubApplyModalOpen) {
+    return true;
+  }
+  const active = document.activeElement;
+  if (active && /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName)) return true;
+  return false;
+}
+
 export function startPendingAccessPolling() {
   stopPendingAccessPolling();
   if (!state.authUser) return;
   _pendingAccessPoll = window.setInterval(async () => {
     if (!state.authUser || state.isDemoMode) return;
+    // Never re-render over a form in progress — the poll replaces the whole app's innerHTML.
+    if (hasOpenUserInput()) return;
+
+    const wasApproved = (isClubCore() || isSchoolRep()) && state.host.approved;
     const wasPending = (isClubCore() || isSchoolRep()) && !state.host.approved;
     const wasStudent = state.role === "student";
     const hadPendingApps = (state.clubApplications || []).some((a) => a.status === "pending")
@@ -109,13 +126,20 @@ export function startPendingAccessPolling() {
     try {
       await softRefreshCampusData({ showSkeleton: false });
       const nowHost = (isClubCore() || isSchoolRep()) && state.host.approved;
-      if ((wasPending || wasStudent || hadPendingApps) && nowHost) {
-        stopPendingAccessPolling();
+      // Only announce a genuine transition, or an already-approved user applying for a
+      // second role gets a false "approved" toast and the poll stops before the real one.
+      const becameApproved = !wasApproved && nowHost;
+      if (becameApproved && (wasPending || wasStudent || hadPendingApps)) {
         window.dispatchEvent(new CustomEvent("rvu-toast", {
           detail: { message: "Your access was approved. Admin tools are ready.", type: "success" },
         }));
         renderAtTop();
       }
+      // Keep polling while anything is still pending, so a second role approval is noticed too.
+      const stillPending = (state.clubApplications || []).some((a) => a.status === "pending")
+        || (state.hostRequests || []).some((r) => r.status === "pending" && r.uid === state.authUser?.uid)
+        || ((isClubCore() || isSchoolRep()) && !state.host.approved);
+      if (!stillPending && becameApproved) stopPendingAccessPolling();
     } catch (_) {
       /* keep polling */
     }
@@ -134,6 +158,7 @@ export function startExpiryRefreshPolling() {
   stopExpiryRefreshPolling();
   _expiryRefreshPoll = window.setInterval(() => {
     if (!state.authed || state.isDemoMode) return;
+    if (hasOpenUserInput()) return;
     let changed = false;
     const nextEvents = events.filter((event) => {
       const expired = Boolean(normalizeEvent(event).past);
@@ -209,8 +234,12 @@ export function activeClub() {
   };
 }
 
+/**
+ * Restricted to RV University accounts. Must agree with isRvuEmail() in js/services.js,
+ * admin.js and firestore.rules — if they disagree, sign-in accepts then force-signs-out.
+ */
 export function isAllowedRvuEmail(email) {
-  return typeof email === "string" && email.trim().includes("@");
+  return typeof email === "string" && email.trim().toLowerCase().endsWith(EMAIL_DOMAIN);
 }
 
 export async function syncFirebaseData({ quiet = false } = {}) {
@@ -238,12 +267,8 @@ export async function syncFirebaseData({ quiet = false } = {}) {
   if (profile.roleTitle) state.host.roleTitle = profile.roleTitle;
   if (profile.hostName) state.host.name = profile.hostName;
   if (profile.hostApproved !== undefined) state.host.approved = profile.hostApproved;
-  if (profile.role === "superAdmin" || profile.onboardingComplete) {
-    state.onboardingStep = null;
-  } else if (!state.onboardingStep) {
-    state.onboardingStep = "role";
-  }
   const data = await window.RVUFirebase.loadCampusData({ superAdmin: state.role === "admin", profile });
+  state.loadErrors = data.loadErrors || [];
   replaceCollection(clubs, data.clubs);
   replaceCollection(events, data.events.map(normalizeEvent));
   replaceCollection(announcements, data.announcements);
@@ -272,7 +297,6 @@ export async function syncFirebaseData({ quiet = false } = {}) {
     state.host.roleTitle = data.clubAccess.member.role || "core";
     state.host.name = data.clubAccess.member.name || data.clubAccess.club.name;
     state.host.approved = true;
-    state.onboardingStep = null;
   } else {
     state.host.clubAccesses = data.clubAccesses || [];
   }
@@ -287,32 +311,92 @@ export async function syncFirebaseData({ quiet = false } = {}) {
       state.host.name = data.schoolAccess.representative.name || state.host.name;
     }
     state.host.approved = true;
-    state.onboardingStep = null;
   } else {
     state.host.schoolAccesses = data.schoolAccesses || [];
   }
+
+  applyOnboardingState(profile, data);
+
   state.dataLoaded = true;
   state.dataLoading = false;
 }
 
+/**
+ * Decide, once, whether this sign-in should show onboarding.
+ *
+ * Onboarding is for genuinely NEW accounts only. It must never be the default: `onboardingStep`
+ * starts null and is only raised here, after the profile and campus data are known.
+ *
+ * `onboardingComplete` alone is not a sufficient test. Accounts created before that flag existed
+ * do not carry it, so keying off it directly re-ran onboarding on every single login, forever.
+ * Any other evidence of an established account counts too, and when we infer it we persist the
+ * flag so the repair happens once rather than on every sign-in.
+ */
+function applyOnboardingState(profile, data) {
+  const established =
+    profile.onboardingComplete === true
+    || profile.role === "superAdmin"
+    || state.role !== "student"
+    || state._hasClubCore
+    || state._hasSchoolRep
+    // Already picked a role and filled the profile in.
+    || Boolean(profile.school)
+    || Boolean(profile.year)
+    || (Array.isArray(profile.interests) && profile.interests.length > 0)
+    // Already asked for a role, even if still pending.
+    || (data.hostRequests || []).length > 0
+    || (data.clubApplications || []).length > 0
+    // Already used the app.
+    || (data.savedItems || []).length > 0
+    || (data.followedClubs || []).length > 0;
+
+  if (established) {
+    state.onboardingStep = null;
+    if (profile.onboardingComplete !== true) {
+      // One-time repair so this account is never asked again.
+      window.RVUFirebase.saveUserProfile(state.authUser.uid, { onboardingComplete: true })
+        .catch((error) => console.warn("[RVU] Could not persist onboardingComplete", error));
+    }
+    return;
+  }
+
+  // Genuinely new: no profile data, no roles, no activity. Start onboarding, unless the user is
+  // already partway through it in this session.
+  if (!state.onboardingStep) state.onboardingStep = "role";
+}
+
+/** Local Date for an event's start, or null when the date is not a parseable YYYY-MM-DD. */
+export function eventStartDate(event) {
+  const dateStr = String(event?.date || event?.displayDate || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return null;
+  let timeStr = String(event.time || "23:59").trim();
+  if (/^\d{1,2}:\d{2}$/.test(timeStr)) timeStr = `${timeStr}:00`;
+  if (!/^\d{1,2}:\d{2}:\d{2}$/.test(timeStr)) timeStr = "23:59:00";
+  const dt = new Date(`${dateStr}T${timeStr}`);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
 export function normalizeEvent(event) {
   const eventDate = event.date || event.displayDate || "";
+  const startsAt = eventStartDate(event);
   let past = Boolean(event.past);
-  if (!past && eventDate && /^\d{4}-\d{2}-\d{2}$/.test(String(eventDate).trim())) {
-    let timeStr = String(event.time || "23:59").trim();
-    if (/^\d{1,2}:\d{2}$/.test(timeStr)) timeStr = `${timeStr}:00`;
-    if (!/^\d{1,2}:\d{2}:\d{2}$/.test(timeStr)) timeStr = "23:59:00";
-    const dt = new Date(`${String(eventDate).trim()}T${timeStr}`);
-    if (!Number.isNaN(dt.getTime())) past = dt.getTime() < Date.now();
-  }
+  if (!past && startsAt) past = startsAt.getTime() < Date.now();
+
   return {
     colors: ["#233039", "#926d2f"],
     tags: [],
-    sort: 999,
     ...event,
     date: eventDate,
     past,
+    startsAtMs: startsAt ? startsAt.getTime() : null,
+    // Real chronological key — must not be a constant, or "soonest first" sorts by nothing.
+    sort: startsAt ? startsAt.getTime() : Number.MAX_SAFE_INTEGER,
   };
+}
+
+/** Chronological comparator for events — soonest first, undated last. */
+export function bySoonest(a, b) {
+  return (a?.sort ?? Number.MAX_SAFE_INTEGER) - (b?.sort ?? Number.MAX_SAFE_INTEGER);
 }
 
 export function hydrateCampusState(data) {
@@ -342,6 +426,8 @@ export async function enterAuthenticatedApp(user) {
   }
   state.authed = true;
   state.authUser = user;
+  // Or the demo banner and demo-only behaviour persist into a real signed-in session.
+  state.isDemoMode = false;
   if (user.displayName) state.user.name = user.displayName;
   try {
     await syncFirebaseData();
@@ -361,7 +447,9 @@ export async function enterAuthenticatedApp(user) {
     stopPendingAccessPolling();
   }
   startExpiryRefreshPolling();
-  renderAtTop();
+  // renderCurrentRoute, not renderAtTop — the route-level data loaders only run there.
+  const { renderCurrentRoute } = await import('./router.js');
+  await renderCurrentRoute();
 }
 
 export function enterDemoApp() {
@@ -384,23 +472,97 @@ export function enterDemoApp() {
   renderAtTop();
 }
 
+/**
+ * Clear everything tied to the previous session. A partial reset lets the next sign-in in the
+ * same tab render the previous user's role and data, including host-only controls.
+ */
+export function resetSessionState() {
+  state.authed = false;
+  state.authUser = null;
+  state.role = null;
+  state.isDemoMode = false;
+  state.dataLoaded = false;
+  state.dataLoading = false;
+  // Not "role" — the next sign-in decides from that account's own profile. Re-arming it here
+  // showed onboarding to the next user before their profile had even loaded.
+  state.onboardingStep = null;
+  state.route = "home";
+  state.user = { name: "", school: schools[0], year: "1", interests: [] };
+
+  state.host = {
+    type: "Club Core",
+    clubSlug: "",
+    selectedClubIds: [],
+    school: schools[0],
+    roleTitle: "Core Member",
+    name: "",
+    category: "",
+    description: "",
+    email: "",
+    joinLink: "",
+    approver: "Current president",
+    approvedBy: "Super Admin",
+    approved: false,
+    clubAccesses: [],
+    schoolAccesses: [],
+  };
+  state._hasClubCore = false;
+  state._hasSchoolRep = false;
+
+  replaceCollection(events, []);
+  replaceCollection(clubs, []);
+  replaceCollection(announcements, []);
+  replaceCollection(projects, []);
+
+  state.hostRequests = [];
+  state.moderationFlags = [];
+  state.allUsers = [];
+  state.allEvents = [];
+  state.allAnnouncements = [];
+  state.allClubs = [];
+  state.allSchools = [];
+  state.contentReviews = [];
+  state.savedItems = [];
+  state.followedClubs = [];
+  state.rsvps = [];
+  state.myApplications = [];
+  state.clubApplications = [];
+  state.clubApplicants = [];
+  state.clubCoreMembers = [];
+  state.siteSettings = [];
+  state.loadErrors = [];
+
+  // Memoisation flags — stale values leak the previous session's data.
+  state._clubApplicantsLoaded = false;
+  state._clubApplicantsLoading = false;
+  state._loadedClubCoreFor = null;
+  state._clubCoreMembersLoading = false;
+
+  state.createEventOpen = false;
+  state.editEventOpen = false;
+  state.createAnnouncementOpen = false;
+  state.editAnnouncementOpen = false;
+  state.createProjectOpen = false;
+  state.editProfileOpen = false;
+  state.editClubOpen = false;
+  state.createOpen = false;
+  state.searchOpen = false;
+  state.searchQuery = "";
+  state.loginOpen = false;
+  state._clubApplyModalOpen = false;
+  state.selectedEventId = null;
+  state.selectedProjectId = null;
+  state.selectedAnnouncementId = null;
+  state.selectedClubSlug = null;
+}
+
 export async function handleSignOut() {
   if (!window.RVUFirebase) return;
   try {
     await window.RVUFirebase.signOut();
     stopPendingAccessPolling();
     stopExpiryRefreshPolling();
-    state.authed = false;
-    state.authUser = null;
-    state.role = null;
-    state.dataLoaded = false;
-    state.onboardingStep = "role";
-    state.route = "home";
-    state.user = { name: "", school: schools[0], year: "1", interests: [] };
-    state.allUsers = [];
-    state.allEvents = [];
-    state.allAnnouncements = [];
-    state.allClubs = [];
+    resetSessionState();
     renderAtTop();
   } catch (error) {
     window.alert(error.message || "Sign-out failed.");

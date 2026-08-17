@@ -6,9 +6,12 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    // The single server-side gate on the whole dataset. Without the domain check, any
+    // Google account can read every club, event, announcement and project.
     function isRvuEmail() {
       return signedIn()
-        && request.auth.token.email is string;
+        && request.auth.token.email is string
+        && request.auth.token.email.lower().matches('.*@rvu[.]edu[.]in');
     }
 
     function isSuperAdmin() {
@@ -86,11 +89,19 @@ service cloud.firestore {
     }
 
     match /users/{uid} {
+      // Privilege fields must never appear on a self-created profile — isApprovedSchoolRep()
+      // trusts schoolRepApproved, so allowing it here is a student -> school-rep escalation.
+      // Block ONLY the privilege-bearing keys: ensureUserProfile legitimately writes name,
+      // role, email, clubIds, roleTitle, interests, onboardingComplete and the timestamps, and
+      // blocking any of those denies every new sign-up.
       allow create: if isRvuEmail()
         && createsOwnDoc(uid)
         && request.resource.data.role == 'student'
         && request.resource.data.email is string
-        && request.resource.data.email.lower() == authEmailKey();
+        && request.resource.data.email.lower() == authEmailKey()
+        && !request.resource.data.keys().hasAny([
+          'schoolRepApproved', 'clubCoreApproved', 'hostApproved'
+        ]);
 
       allow read: if isSuperAdmin() || (isRvuEmail() && createsOwnDoc(uid));
 
@@ -132,7 +143,6 @@ service cloud.firestore {
         allow read, create, update, delete: if isRvuEmail() && createsOwnDoc(uid);
       }
 
-
     }
 
     match /superAdmins/{adminId} {
@@ -162,14 +172,10 @@ service cloud.firestore {
       allow update: if isSuperAdmin() || (isApprovedClubCore(clubId) && unchanged('createdAt') && unchanged('createdBy'));
 
       match /coreMembers/{memberEmail} {
-        // Own membership by doc id, or by uid/email fields (collectionGroup-safe), or fellow cores.
+        // Shown on every club page, so any RVU account may read it. The club document already
+        // exposes founder/president/advisor names and emails.
         allow read: if isSuperAdmin()
-          || (isRvuEmail() && (
-            memberEmail == request.auth.token.email
-            || memberEmail == authEmailKey()
-            || resource.data.uid == request.auth.uid
-            || (resource.data.email is string && resource.data.email.lower() == authEmailKey())
-          ))
+          || isRvuEmail()
           || isApprovedClubCore(clubId);
 
         // Super admin / approved core / founder can manage the roster.
@@ -249,6 +255,8 @@ service cloud.firestore {
         || (resource.data.hostType == 'club' && isApprovedClubCore(resource.data.clubId))
         || (resource.data.hostType == 'school' && isApprovedSchoolRep());
 
+      // Unused by the app — attendance is off-platform via the event's Join link. Kept
+      // owner-only so any pre-existing data stays reachable by whoever wrote it.
       match /rsvps/{uid} {
         allow read: if isSuperAdmin() || createsOwnDoc(uid);
         allow create, update, delete: if isRvuEmail() && createsOwnDoc(uid);

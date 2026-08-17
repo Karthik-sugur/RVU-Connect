@@ -7,7 +7,10 @@
     "doc": "docs"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "npm run lint && npm run test:onboarding && npm run test:rules",
+    "lint": "node --experimental-vm-modules scripts/check-syntax.mjs js/*.js admin.js sample-data.js",
+    "test:rules": "firebase emulators:exec --only firestore --project rvu-connect-rules-test \"node tests/firestore.rules.test.js\"",
+    "test:onboarding": "node tests/onboarding.test.mjs"
   },
   "repository": {
     "type": "git",

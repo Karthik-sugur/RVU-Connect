@@ -121,17 +121,30 @@ button {
   min-height: 0;
 }
 
+/* Shared by the dark rail and the light login/denied cards, so colours come from
+   currentColor/inherit — a fixed light colour is invisible on cream. */
 .tabs button,
 .link-button {
-  border: 1px solid rgba(246, 240, 229, 0.18);
+  border: 1px solid currentColor;
   background: transparent;
-  color: rgba(246, 240, 229, 0.7);
+  color: inherit;
+  opacity: 0.75;
   padding: 12px;
+  min-height: 40px;
   text-align: left;
   font-family: var(--mono);
   font-size: 10px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+.link-button:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
 }
 
 .tabs button.active,
@@ -139,6 +152,7 @@ button {
 .link-button:hover {
   background: var(--gold);
   color: var(--ink);
+  opacity: 1;
 }
 
 .rail-actions {

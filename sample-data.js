@@ -297,6 +297,8 @@ export const demoCampusData = {
       tags: ["AI", "Product"],
       colors: ["#1f2937", "#b98935"],
       sort: 1,
+      link: "https://forms.gle/rvu-connect-demo",
+
       status: "published",
     },
     {
@@ -312,6 +314,8 @@ export const demoCampusData = {
       tags: ["Web Development"],
       colors: ["#0f766e", "#f59e0b"],
       sort: 2,
+      link: "https://forms.gle/rvu-connect-demo",
+
       status: "published",
     },
     {
@@ -327,6 +331,8 @@ export const demoCampusData = {
       tags: ["Design", "Product"],
       colors: ["#7c3aed", "#eab308"],
       sort: 3,
+      link: "https://forms.gle/rvu-connect-demo",
+
       status: "published",
     },
     {
@@ -342,6 +348,8 @@ export const demoCampusData = {
       tags: ["Law"],
       colors: ["#374151", "#c084fc"],
       sort: 4,
+      link: "https://forms.gle/rvu-connect-demo",
+
       status: "published",
     },
     {
@@ -357,6 +365,8 @@ export const demoCampusData = {
       tags: ["Business", "Product", "Marketing"],
       colors: ["#92400e", "#14b8a6"],
       sort: 5,
+      link: "https://forms.gle/rvu-connect-demo",
+
       status: "published",
     },
     {
@@ -372,6 +382,8 @@ export const demoCampusData = {
       tags: ["Healthcare", "Design"],
       colors: ["#047857", "#f97316"],
       sort: 6,
+      link: "https://forms.gle/rvu-connect-demo",
+
       status: "published",
     },
     {
@@ -387,6 +399,8 @@ export const demoCampusData = {
       tags: ["Film"],
       colors: ["#111827", "#dc2626"],
       sort: 7,
+      link: "https://forms.gle/rvu-connect-demo",
+
       status: "published",
     },
     {
@@ -401,6 +415,8 @@ export const demoCampusData = {
       tags: ["Finance", "Law"],
       colors: ["#155e75", "#eab308"],
       sort: 8,
+      link: "https://forms.gle/rvu-connect-demo",
+
       status: "published",
     },
     {
@@ -416,6 +432,8 @@ export const demoCampusData = {
       tags: ["Marketing", "Design"],
       colors: ["#be123c", "#0ea5e9"],
       sort: 9,
+      link: "https://forms.gle/rvu-connect-demo",
+
       status: "published",
     },
     {
@@ -430,6 +448,8 @@ export const demoCampusData = {
       tags: ["Design", "Policy"],
       colors: ["#4338ca", "#84cc16"],
       sort: 10,
+      link: "https://forms.gle/rvu-connect-demo",
+
       status: "published",
     },
     {
@@ -444,6 +464,8 @@ export const demoCampusData = {
       tags: ["Design", "Web Development", "Business"],
       colors: ["#0f172a", "#22c55e"],
       sort: 11,
+      link: "https://forms.gle/rvu-connect-demo",
+
       status: "published",
     },
     {
@@ -459,6 +481,8 @@ export const demoCampusData = {
       tags: ["Product", "Business"],
       colors: ["#0369a1", "#f43f5e"],
       sort: 12,
+      link: "https://forms.gle/rvu-connect-demo",
+
       status: "published",
     },
     {
@@ -474,6 +498,8 @@ export const demoCampusData = {
       tags: ["Film", "Design"],
       colors: ["#7f1d1d", "#facc15"],
       sort: 13,
+      link: "https://forms.gle/rvu-connect-demo",
+
       status: "published",
     },
     {
@@ -489,6 +515,8 @@ export const demoCampusData = {
       tags: ["Finance", "Business"],
       colors: ["#064e3b", "#fbbf24"],
       sort: 14,
+      link: "https://forms.gle/rvu-connect-demo",
+
       status: "published",
     },
     {
@@ -503,6 +531,8 @@ export const demoCampusData = {
       tags: ["Business", "Design", "AI"],
       colors: ["#1f2937", "#d97706"],
       sort: 15,
+      link: "https://forms.gle/rvu-connect-demo",
+
       status: "published",
     },
     {
@@ -519,6 +549,8 @@ export const demoCampusData = {
       colors: ["#334155", "#f97316"],
       sort: 90,
       past: true,
+      link: "https://forms.gle/rvu-connect-demo",
+
       status: "published",
     },
     {
@@ -535,6 +567,8 @@ export const demoCampusData = {
       colors: ["#3f3f46", "#a855f7"],
       sort: 91,
       past: true,
+      link: "https://forms.gle/rvu-connect-demo",
+
       status: "published",
     },
     {
@@ -551,6 +585,8 @@ export const demoCampusData = {
       colors: ["#78350f", "#10b981"],
       sort: 92,
       past: true,
+      link: "https://forms.gle/rvu-connect-demo",
+
       status: "published",
     },
   ],
@@ -563,6 +599,8 @@ export const demoCampusData = {
       type: "Club",
       tag: "Recruitment",
       time: "Today",
+      link: "https://forms.gle/rvu-connect-demo",
+
       status: "published",
       clubId: "demo-club-ai-forge",
     },
@@ -575,6 +613,8 @@ export const demoCampusData = {
       type: "School",
       tag: "Notice",
       time: "Today",
+      link: "https://forms.gle/rvu-connect-demo",
+
       status: "published",
     },
     {
@@ -585,6 +625,8 @@ export const demoCampusData = {
       type: "Club",
       tag: "Update",
       time: "Yesterday",
+      link: "https://forms.gle/rvu-connect-demo",
+
       status: "published",
       clubId: "demo-club-design-studio",
     },
@@ -596,6 +638,8 @@ export const demoCampusData = {
       type: "Club",
       tag: "Notice",
       time: "2 days ago",
+      link: "https://forms.gle/rvu-connect-demo",
+
       status: "published",
       clubId: "demo-club-moot",
     },
@@ -607,6 +651,8 @@ export const demoCampusData = {
       type: "Club",
       tag: "Recruitment",
       time: "2 days ago",
+      link: "https://forms.gle/rvu-connect-demo",
+
       status: "published",
       clubId: "demo-club-health",
     },
@@ -619,6 +665,8 @@ export const demoCampusData = {
       type: "School",
       tag: "Update",
       time: "3 days ago",
+      link: "https://forms.gle/rvu-connect-demo",
+
       status: "published",
     },
     {
@@ -629,6 +677,8 @@ export const demoCampusData = {
       type: "Club",
       tag: "Update",
       time: "3 days ago",
+      link: "https://forms.gle/rvu-connect-demo",
+
       status: "published",
       clubId: "demo-club-marketing",
     },
@@ -640,6 +690,8 @@ export const demoCampusData = {
       type: "Club",
       tag: "Recruitment",
       time: "4 days ago",
+      link: "https://forms.gle/rvu-connect-demo",
+
       status: "published",
       clubId: "demo-club-film",
     },
@@ -651,6 +703,8 @@ export const demoCampusData = {
       type: "Club",
       tag: "Notice",
       time: "4 days ago",
+      link: "https://forms.gle/rvu-connect-demo",
+
       status: "published",
       clubId: "demo-club-product",
     },
@@ -662,6 +716,8 @@ export const demoCampusData = {
       type: "Club",
       tag: "Update",
       time: "5 days ago",
+      link: "https://forms.gle/rvu-connect-demo",
+
       status: "published",
       clubId: "demo-club-finance",
     },
@@ -673,6 +729,8 @@ export const demoCampusData = {
       type: "Club",
       tag: "Recruitment",
       time: "5 days ago",
+      link: "https://forms.gle/rvu-connect-demo",
+
       status: "published",
       clubId: "demo-club-arts",
     },
@@ -684,6 +742,8 @@ export const demoCampusData = {
       type: "Club",
       tag: "Update",
       time: "6 days ago",
+      link: "https://forms.gle/rvu-connect-demo",
+
       status: "published",
       clubId: "demo-club-founders",
     },
