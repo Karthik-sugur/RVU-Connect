@@ -13,7 +13,7 @@ Every blocker and every confirmed finding below has been fixed on this branch. S
 Verification now in the repo:
 
 ```bash
-npm test    # 19 modules parse + 24 Firestore rules tests, all passing
+npm test    # 19 modules parse + 12 onboarding + 27 Firestore rules tests, all passing
 ```
 
 Two fixes were re-proven live in a browser against the real render functions:
@@ -502,5 +502,5 @@ mobile and accessibility. Files read in full include `js/services.js`, `js/ui.js
   an index for each composite query it issues.
 
 **Artifacts:** workflow run `wf_2d2dd564-91f`; structured findings at
-`scratchpad/audit.json`; local QA server at `.claude/static-server.js` + `.claude/launch.json`
-(`node .claude/static-server.js`, then open `http://localhost:8765`).
+`scratchpad/audit.json`. To reproduce the browser checks, serve the repo with `npx serve .` and
+open the printed URL.

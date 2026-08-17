@@ -27,3 +27,6 @@ __pycache__/
 firestore-debug.log
 ui-debug.log
 firebase-export-*/
+
+# Local agent/session workspace
+.claude/
