@@ -25,40 +25,56 @@ Either of those two is enough on its own — `hasSuperAdminGrant()` checks the `
 document first and falls back to `users/{uid}.role`. Writing both keeps the client and the rules
 in agreement.
 
+Do steps 2 and 3 **in the Firebase Console, signed in as the project owner**
+(`kushalsathyanarayan@gmail.com`). Console writes run with admin privileges and bypass security
+rules, which is what breaks the chicken-and-egg problem: `superAdmins` can only be written by an
+existing super admin (`firestore.rules`), so the first one has to be created out-of-band.
+
 **Retire any other admin account.** If a non-RVU address is still present in `superAdmins` or has
 `users/{uid}.role == "superAdmin"`, delete that `superAdmins` document and set its role back to
 `student`. Leaving it costs nothing functionally once the rules are deployed — the domain check
 already denies it — but it is a stale grant, and stale grants are what the audit kept finding.
 
-## The CLI needs re-authentication
+## Two different accounts — do not mix them up
 
-The credentials stored on this machine are expired, so I could not deploy for you:
+| Role | Account | Used for |
+|---|---|---|
+| **Firebase project owner** | `kushalsathyanarayan@gmail.com` | Signing in to the CLI and the Firebase Console. Deploying rules and indexes is a project-admin action. |
+| **In-app Super Admin** | `kushalsbtech24@rvu.edu.in` | Signing in to RVU Connect itself. Must be `@rvu.edu.in`, because the new rules gate everything on that domain. |
+
+These are unrelated and both are correct as-is. The gmail account never needs to sign in to the
+app — and under the new rules it could not, since `isRvuEmail()` would reject it. Equally, the RVU
+account does not need project permissions unless you want it to deploy too.
+
+## Signing in to the CLI
+
+The stored credentials on this machine were expired and have been cleared, so the CLI currently has
+no account:
 
 ```
-Error: HTTP Error: 401, Request had invalid authentication credentials.
+Error: Failed to authenticate, have you run firebase login?
 ```
 
-They also belonged to a different Google account. Clear it and sign in as the RVU account — this
-is an interactive browser flow, so it has to be you:
-
-```bash
-npx firebase logout
-```
+Re-auth is an interactive browser OAuth flow, so it has to be you — no one can do it on your
+behalf, and an email address alone grants nothing:
 
 ```bash
 npx firebase login
 ```
 
-Pick `kushalsbtech24@rvu.edu.in` in the browser prompt, then confirm:
+Pick **`kushalsathyanarayan@gmail.com`** in the browser prompt — the account that owns the
+`rvuconnect-26c39` project. Then confirm:
 
 ```bash
 npx firebase login:list
 ```
 
-The account you deploy with needs Editor or Owner on the `rvuconnect-26c39` project. Deploying
-rules is a project-admin action and is unrelated to the in-app Super Admin role — but if this RVU
-account is not yet a project member, add it in Firebase Console → Project settings → Users and
-permissions.
+The CLI caches that session on this machine, so once it is done the deploy and verification
+commands below will work without logging in again.
+
+If the deploy later fails with a permissions error rather than an auth error, the account is
+signed in but lacks project rights — add it under Firebase Console → Project settings → Users and
+permissions with Editor or Owner.
 
 ---
 
