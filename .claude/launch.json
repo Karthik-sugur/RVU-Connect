@@ -4,7 +4,7 @@
     {
       "name": "rvu-connect",
       "runtimeExecutable": "node",
-      "runtimeArgs": ["/Users/kushalsathyanarayan/Desktop/RVU_connect/.claude/static-server.js"],
+      "runtimeArgs": [".claude/static-server.js"],
       "port": 8765
     }
   ]

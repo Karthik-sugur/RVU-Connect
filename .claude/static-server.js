@@ -1,11 +1,14 @@
 // Minimal static file server for local QA of RVU Connect.
-// Uses an absolute root so it does not depend on the spawn cwd.
+//
+// Serves the repo root, resolved from this file's own location rather than from the working
+// directory — the launcher may start it with a cwd it cannot read, and hardcoding an absolute
+// path would tie the harness to one machine.
 const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const ROOT = "/Users/kushalsathyanarayan/Desktop/RVU_connect";
-const PORT = 8765;
+const ROOT = path.resolve(__dirname, "..");
+const PORT = Number(process.env.PORT) || 8765;
 
 const TYPES = {
   ".html": "text/html; charset=utf-8",
