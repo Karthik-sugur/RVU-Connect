@@ -104,11 +104,8 @@ export function renderRestrictedAdmin() {
 }
 
 export function renderPendingAdminAccess() {
-  /*
-   * Show the real status of each request instead of a generic "pending" screen.
-   * A club that was deleted, or a request that was rejected, previously left the applicant
-   * on "Waiting for approval" indefinitely with nothing explaining why and no way to act.
-   */
+  // Show the real status of each request — a rejected one or a deleted club must not leave
+  // the applicant on a generic "pending" screen with no explanation and no way to act.
   const myUid = state.authUser?.uid;
   const requests = (state.hostRequests || []).filter((r) => !myUid || r.uid === myUid);
   const applications = state.clubApplications || [];

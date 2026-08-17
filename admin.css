@@ -121,13 +121,9 @@ button {
   min-height: 0;
 }
 
+/* Shared by the dark rail and the light login/denied cards, so colours come from
+   currentColor/inherit — a fixed light colour is invisible on cream. */
 .tabs button,
-/*
- * Styled for the dark rail. It is also used on the light login/denied cards, where
- * rgba(246,240,229,0.7) on cream was effectively invisible — the only escape route out of
- * the console could not be seen. `currentColor` inherits the surrounding card's text colour
- * so it stays legible on both grounds.
- */
 .link-button {
   border: 1px solid currentColor;
   background: transparent;

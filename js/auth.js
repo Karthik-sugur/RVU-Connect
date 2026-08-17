@@ -12,7 +12,6 @@ export function isSchoolRep() {
   return Boolean(state._hasSchoolRep) || state.role === "school-rep";
 }
 
-
 export function isSuperAdmin() {
   return state.role === "admin";
 }
@@ -106,7 +105,6 @@ function hasOpenUserInput() {
     || state.onboardingStep || state._clubApplyModalOpen) {
     return true;
   }
-  // Any focused field with content, anywhere (covers modals this list does not know about).
   const active = document.activeElement;
   if (active && /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName)) return true;
   return false;
@@ -117,8 +115,7 @@ export function startPendingAccessPolling() {
   if (!state.authUser) return;
   _pendingAccessPoll = window.setInterval(async () => {
     if (!state.authUser || state.isDemoMode) return;
-    // Never blow away a form the user is filling in. The poll re-renders the whole app via
-    // innerHTML, which previously discarded half-typed events, projects and profile edits.
+    // Never re-render over a form in progress — the poll replaces the whole app's innerHTML.
     if (hasOpenUserInput()) return;
 
     const wasApproved = (isClubCore() || isSchoolRep()) && state.host.approved;
@@ -129,9 +126,8 @@ export function startPendingAccessPolling() {
     try {
       await softRefreshCampusData({ showSkeleton: false });
       const nowHost = (isClubCore() || isSchoolRep()) && state.host.approved;
-      // Only announce a genuine transition into approved access. Announcing whenever
-      // "nowHost" was true fired a false "approved" toast at an already-approved user who
-      // had merely applied for a second role, and stopped the poll before the real approval.
+      // Only announce a genuine transition, or an already-approved user applying for a
+      // second role gets a false "approved" toast and the poll stops before the real one.
       const becameApproved = !wasApproved && nowHost;
       if (becameApproved && (wasPending || wasStudent || hadPendingApps)) {
         window.dispatchEvent(new CustomEvent("rvu-toast", {
@@ -162,7 +158,6 @@ export function startExpiryRefreshPolling() {
   stopExpiryRefreshPolling();
   _expiryRefreshPoll = window.setInterval(() => {
     if (!state.authed || state.isDemoMode) return;
-    // Same rule as the access poller: never re-render over a form in progress.
     if (hasOpenUserInput()) return;
     let changed = false;
     const nextEvents = events.filter((event) => {
@@ -240,10 +235,8 @@ export function activeClub() {
 }
 
 /**
- * RVU Connect is restricted to RV University accounts. This must agree with
- * isRvuEmail() in js/services.js, isRvuEmail() in admin.js and isRvuEmail() in
- * firestore.rules — they previously disagreed, so the UI accepted addresses the
- * sign-in path then rejected with a forced sign-out.
+ * Restricted to RV University accounts. Must agree with isRvuEmail() in js/services.js,
+ * admin.js and firestore.rules — if they disagree, sign-in accepts then force-signs-out.
  */
 export function isAllowedRvuEmail(email) {
   return typeof email === "string" && email.trim().toLowerCase().endsWith(EMAIL_DOMAIN);
@@ -282,15 +275,13 @@ export async function syncFirebaseData({ quiet = false } = {}) {
   const data = await window.RVUFirebase.loadCampusData({ superAdmin: state.role === "admin", profile });
   state.loadErrors = data.loadErrors || [];
 
-  // Anyone who has already submitted a host request or club application has finished
-  // onboarding, even while it is still pending. Without this the blocking role-picker modal
-  // re-opened on every load for pending club-core applicants, with no way to finish or exit.
+  // A submitted request/application counts as onboarded even while pending, or the blocking
+  // role-picker modal re-opens on every load with no way to finish or exit.
   const hasSubmittedHostIntent = (data.hostRequests || []).length > 0
     || (data.clubApplications || []).length > 0;
   if (hasSubmittedHostIntent && state.onboardingStep) {
     state.onboardingStep = null;
     if (!profile.onboardingComplete) {
-      // Persist it so the next load does not depend on re-reading those collections.
       window.RVUFirebase.saveUserProfile(state.authUser.uid, { onboardingComplete: true })
         .catch((error) => console.warn("[RVU] Could not persist onboardingComplete", error));
     }
@@ -370,9 +361,7 @@ export function normalizeEvent(event) {
     date: eventDate,
     past,
     startsAtMs: startsAt ? startsAt.getTime() : null,
-    // Real chronological sort key. This was hard-coded to 999 for every event, so
-    // "soonest first" and the Home "Next up" spotlight were really "most recently created".
-    // Undated events sort last rather than first.
+    // Real chronological key — must not be a constant, or "soonest first" sorts by nothing.
     sort: startsAt ? startsAt.getTime() : Number.MAX_SAFE_INTEGER,
   };
 }
@@ -409,8 +398,7 @@ export async function enterAuthenticatedApp(user) {
   }
   state.authed = true;
   state.authUser = user;
-  // Leaving demo mode set kept the "no data is being saved" banner (and its demo-only
-  // behaviour) in a real signed-in session when the user came in via Explore demo.
+  // Or the demo banner and demo-only behaviour persist into a real signed-in session.
   state.isDemoMode = false;
   if (user.displayName) state.user.name = user.displayName;
   try {
@@ -431,10 +419,7 @@ export async function enterAuthenticatedApp(user) {
     stopPendingAccessPolling();
   }
   startExpiryRefreshPolling();
-  // renderCurrentRoute, not renderAtTop: the route-level loaders (club core team, the admin
-  // tab data, the club-core membership applicants queue) only run there. Rendering directly
-  // on boot left a club core staring at an empty "Membership Applications" queue until they
-  // manually navigated away and back.
+  // renderCurrentRoute, not renderAtTop — the route-level data loaders only run there.
   const { renderCurrentRoute } = await import('./router.js');
   await renderCurrentRoute();
 }
@@ -460,11 +445,8 @@ export function enterDemoApp() {
 }
 
 /**
- * Clear everything tied to the previous session.
- *
- * The old sign-out reset only a handful of fields, so signing in as a second user in the
- * same tab rendered the first user's role, club accesses, saved items and campus feed until
- * the next sync landed — including host-only controls for someone who is not a host.
+ * Clear everything tied to the previous session. A partial reset lets the next sign-in in the
+ * same tab render the previous user's role and data, including host-only controls.
  */
 export function resetSessionState() {
   state.authed = false;
@@ -520,13 +502,12 @@ export function resetSessionState() {
   state.siteSettings = [];
   state.loadErrors = [];
 
-  // Memoisation flags — stale values here made the next session show the previous one's data.
+  // Memoisation flags — stale values leak the previous session's data.
   state._clubApplicantsLoaded = false;
   state._clubApplicantsLoading = false;
   state._loadedClubCoreFor = null;
   state._clubCoreMembersLoading = false;
 
-  // Close every overlay so nothing from the old session is left floating.
   state.createEventOpen = false;
   state.editEventOpen = false;
   state.createAnnouncementOpen = false;

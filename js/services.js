@@ -4,7 +4,6 @@ import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut } from
 import { handleFirebaseError } from "./errors.js";
 import { EMAIL_DOMAIN } from "./constants.js";
 
-
 function isRvuEmail(email) {
   return typeof email === "string" && email.trim().toLowerCase().endsWith(EMAIL_DOMAIN);
 }
@@ -263,11 +262,7 @@ function tracedWriteBatch(batchLabel) {
   };
 }
 
-/**
- * Collects load failures for the current loadCampusData call so the UI can distinguish
- * "nothing here yet" from "we could not load this". Previously every failure became a
- * silent empty array and the user saw a confident empty state on an error.
- */
+/** Load failures for the current loadCampusData call, so the UI can tell empty from failed. */
 let _loadErrors = [];
 
 function beginLoadErrorCapture() {
@@ -278,11 +273,7 @@ function collectedLoadErrors() {
   return _loadErrors.slice();
 }
 
-/**
- * Newest-first by createdAt, with undated documents last rather than dropped.
- * Used instead of a Firestore orderBy wherever completeness matters more than server-side
- * ordering — see loadAdminTab for why.
- */
+/** Newest-first by createdAt, undated last. See loadAdminTab for why this is not an orderBy. */
 function sortByCreatedAtDesc(list) {
   const ms = (row) => {
     const value = row?.createdAt;
@@ -410,9 +401,8 @@ async function resolveOwnClubAccesses({ uid, email, clubs, clubApplications, pro
     }
   }));
 
-  // Legacy clubs may predate coreMembers. Repair them by writing the roster document rather
-  // than granting access off club.founderEmail alone — a standing email-only grant meant a
-  // founder who left club core kept the full management UI forever with nothing to revoke.
+  // Legacy clubs may predate coreMembers. Backfill a roster document rather than granting
+  // access off club.founderEmail alone, which would be a standing grant nothing can revoke.
   for (const club of clubs || []) {
     const founder = String(club.founderEmail || "").trim().toLowerCase();
     if (!founder || founder !== emailKey) continue;
@@ -546,15 +536,12 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
 
   const announcementRows = rows(announcementsSnap).filter((item) => !isAnnouncementExpired(item));
 
-  // Hide events past their date+time. This is a FILTER ONLY — never a delete.
-  // Deleting here previously destroyed campus history irreversibly as a side effect of
-  // simply reading the feed (a super admin login wiped every past event and orphaned its
-  // rsvps subcollection). Purging, if ever wanted, belongs in an explicit admin action.
+  // FILTER ONLY — never delete here. Deleting on read destroys campus history as a side
+  // effect of loading the feed. Purging belongs in an explicit admin action.
   const liveEventRows = rows(eventsSnap)
     .filter((event) => !isEventExpired(event))
     .map((event) => ({ ...event, past: false }));
 
-  // Hide projects whose expiry date has passed (end of that calendar day). Filter only.
   const liveProjectRows = rows(projectsSnap).filter((project) => !isProjectExpired(project));
 
   const data = {
@@ -708,14 +695,11 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
 
   if (superAdmin) {
     // Only load basic admin context initially, not everything.
-    // moderationFlags MUST be loaded here: it was previously hard-coded to [] so student
-    // content reports were written successfully but never surfaced to any admin.
+
     const [allClubRows, allSchoolRows, flagRows] = await Promise.all([
       rowsOrEmpty("all clubs", getDocs(query(collection(db, "clubs"), limit(100)))),
       rowsOrEmpty("all schools", getDocs(query(collection(db, "schools"), limit(100)))),
-      // Unordered on purpose. A Firestore orderBy silently EXCLUDES documents that lack the
-      // field, so ordering by createdAt would hide any legacy flag written without it — and a
-      // moderation queue that hides reports is worse than one in arbitrary order. Sorted below.
+      // Unordered on purpose: an orderBy would hide flags written without createdAt. Sorted below.
       rowsOrEmpty("moderation flags", getDocs(query(collection(db, "moderationFlags"), limit(ADMIN_PAGE_SIZE)))),
     ]);
     data.allClubs = allClubRows;
@@ -936,17 +920,12 @@ async function submitNewClubCreationRequest(clubDraft) {
   return docId;
 }
 
-/**
- * Pick a free club document id. The id is derived from the club name, so two students each
- * requesting a club with the same name previously collided — approving the second request
- * overwrote the first club, reassigning its founder and silently discarding its profile.
- */
+/** Pick a free club id. Ids derive from the club name, so same-named requests must not collide. */
 async function resolveFreeClubId(baseId, founderEmail) {
   for (let attempt = 0; attempt < 25; attempt += 1) {
     const candidate = attempt === 0 ? baseId : `${baseId}-${attempt + 1}`;
     const snap = await getDoc(doc(db, "clubs", candidate));
     if (!snap.exists()) return candidate;
-    // Re-approving the same founder's own request should reuse their club, not fork a copy.
     const existingFounder = String(snap.data()?.founderEmail || "").trim().toLowerCase();
     if (founderEmail && existingFounder === founderEmail) return candidate;
   }
@@ -1017,9 +996,8 @@ async function updateClubRegistration(clubId, registrationOpen) {
 }
 
 /**
- * Clear the standing grants a host request created, so a rejection actually takes effect.
- * Mirrors what approval writes: the canonical schoolRepresentative_{uid} request, the sticky
- * users.{schoolRepApproved,clubCoreApproved} flags, and the club coreMembers roster document.
+ * Clear the standing grants approval wrote, so a rejection actually takes effect: the canonical
+ * schoolRepresentative_{uid} request, the sticky users flags, and the coreMembers roster doc.
  */
 async function revokeHostGrants(requestData = {}) {
   const uid = requestData.uid;
@@ -1057,7 +1035,6 @@ async function revokeHostGrants(requestData = {}) {
     }
   }
 
-  // Drop back to student only when no other grant remains.
   if (uid) {
     try {
       const snap = await getDoc(doc(db, "users", uid));
@@ -1083,9 +1060,7 @@ async function updateHostRequestStatus(requestId, status) {
     updatedAt: serverTimestamp()
   }, { merge: true });
 
-  // Rejecting must actually revoke. The sticky grants (schoolRepApproved / clubCoreApproved and
-  // the canonical schoolRepresentative_{uid} request) are what firestore.rules trust, so leaving
-  // them set meant a rejected or demoted host kept full publishing rights indefinitely.
+  // The sticky grants are what firestore.rules trust, so a rejection must clear them.
   if (status === "rejected") {
     await revokeHostGrants(requestData);
     return;
@@ -1147,14 +1122,7 @@ async function updateHostRequestStatus(requestId, status) {
   }
 }
 
-/*
- * Site-settings enforcement.
- *
- * The admin console has always written `bannedWords` and `reviewRequired` to
- * siteSettings/platform, but nothing ever read them — both controls were inert, so an admin
- * who "banned" a word or switched on pre-publication review got no behaviour at all.
- * The settings doc is cached on load (see loadCampusData) and consulted here.
- */
+// Enforcement for the siteSettings/platform controls. Cached by loadCampusData.
 let _platformSettings = { bannedWords: [], reviewRequired: false };
 
 function cachePlatformSettings(settingsRows) {
@@ -1176,11 +1144,7 @@ function assertNoBannedWords(payload, fields = ["title", "description"]) {
   if (hit) throw new Error(`"${hit}" is not allowed in campus content. Please reword and try again.`);
 }
 
-/**
- * Resolve the status a new piece of content should be created with.
- * When reviewRequired is on, content starts as a draft so an admin has to publish it.
- * Super admins bypass the queue — they are the reviewers.
- */
+/** Draft when reviewRequired is on, so an admin must publish. Super admins bypass the queue. */
 async function resolvePublishStatus(requested) {
   const wanted = requested || "published";
   if (wanted !== "published") return wanted;
@@ -1240,8 +1204,7 @@ async function createProject(payload) {
 async function updateUserRole(uid, role) {
   requireOneOf(role, ["student", "clubCore", "schoolRepresentative", "superAdmin"], "User role");
   const patch = { role, updatedAt: serverTimestamp() };
-  // Demoting to student must clear the sticky grants the rules actually trust, otherwise the
-  // user keeps school-rep/club-core publishing rights while displaying as a student.
+  // Clear the sticky grants too, or the user keeps publishing rights while displaying as a student.
   if (role === "student") {
     patch.schoolRepApproved = deleteField();
     patch.clubCoreApproved = deleteField();
@@ -1299,7 +1262,6 @@ async function createSchool(payload) {
   return ref.id;
 }
 
-
 async function grantPlatformRole({ email, uid, role }) {
   const normalizedEmail = email?.trim();
   if (!uid) throw new Error("A Firebase Auth UID is required for user role updates.");
@@ -1322,10 +1284,8 @@ async function grantPlatformRole({ email, uid, role }) {
     return;
   }
 
-  // A bare users.role write does NOT grant hosting rights — access is resolved from the club
-  // coreMembers roster (club core) or the sticky schoolRepApproved flag (school rep). Writing
-  // only the role left the user permanently stuck on "Waiting for approval", so require the
-  // caller to supply the scope and write the grant the rules actually read.
+  // A bare users.role write grants nothing: access comes from the coreMembers roster or the
+  // schoolRepApproved flag. Refuse scoped roles here rather than create a half-granted user.
   if (role === "clubCore") {
     throw new Error(
       "Club core is granted per club. Use Clubs → Manage core team to add this member to a specific club."
@@ -1366,7 +1326,7 @@ async function listClubCoreMembers(clubId) {
   return rows(snap).filter((m) => (m.status || "approved") === "approved");
 }
 
-/** Remove another member from a club's core team. Demotes their standing grant too (see leaveClubCore). */
+/** Remove another member from a club's core team. Demotes their grant too — see leaveClubCore. */
 async function removeClubCoreRole(clubId, email) {
   const normalizedEmail = email.trim().toLowerCase();
   const memberRef = doc(db, "clubs", clubId, "coreMembers", normalizedEmail);
@@ -1379,7 +1339,6 @@ async function removeClubCoreRole(clubId, email) {
   if (memberUid) {
     await demoteClubApplication(clubId, memberUid, "revoked");
   } else {
-    // No uid on the roster doc — find the approved application by email instead.
     try {
       const byEmail = await getDocs(query(
         collection(db, "clubApplications"),
@@ -1453,7 +1412,6 @@ async function updateAnnouncementStatus(announcementId, status) {
   });
 }
 
-/** Also refreshes the local settings cache so enforcement applies without a reload. */
 async function updateSiteSetting(settingId, data) {
   await tracedSetDoc(doc(db, "siteSettings", settingId), {
     ...data,
@@ -1521,11 +1479,8 @@ async function unfollowClub(clubId) {
 
 /**
  * Revoke the caller's own club-core membership.
- *
- * The approved clubApplication MUST be demoted in the same operation. It is the standing
- * grant that ensureOwnCoreMembersFromApplications / ensureCoreMembersFromApprovedApps read
- * from, so deleting only the roster document meant the membership was silently recreated the
- * next time anyone opened the club page — access could never actually be revoked.
+ * Must demote the approved clubApplication too — it is the standing grant the self-heal paths
+ * read from, so deleting only the roster doc lets the membership come straight back.
  */
 async function leaveClubCore(clubId) {
   const user = auth.currentUser;
@@ -1536,11 +1491,7 @@ async function leaveClubCore(clubId) {
   await tracedDeleteDoc(doc(db, "clubs", clubId, "coreMembers", email));
 }
 
-/**
- * Mark the standing club-core grant as no longer approved so the self-heal paths ignore it.
- * Best-effort: a legacy auto-id application may not be writable by this caller, in which case
- * the deterministic doc is still cleared and that is what the heal paths consult.
- */
+/** Mark the standing club-core grant not-approved so the self-heal paths ignore it. */
 async function demoteClubApplication(clubId, uid, status) {
   if (!clubId || !uid) return;
   const ref = doc(db, "clubApplications", `${clubId}_${uid}`);
@@ -1552,7 +1503,6 @@ async function demoteClubApplication(clubId, uid, status) {
   } catch (error) {
     console.warn("[RVU] Could not demote club application", `${clubId}_${uid}`, error);
   }
-  // Legacy auto-id applications for the same club/user.
   try {
     const legacy = await getDocs(query(
       collection(db, "clubApplications"),
@@ -1582,7 +1532,6 @@ async function flagContent(payload) {
   });
   return ref.id;
 }
-
 
 // ── Club Application functions ──
 
@@ -1726,7 +1675,6 @@ async function rejectClubApplication(applicationId) {
   });
 }
 
-
 async function loadAllPendingClubApplications() {
   const snap = await getDocs(query(
     collection(db, "clubApplications"),
@@ -1828,7 +1776,6 @@ async function loadMore(collectionName) {
   try {
     snap = await getDocs(q);
   } catch (error) {
-    // Distinguish "nothing left" from "the query failed" — the caller shows different copy.
     return { items: [], exhausted: false, error: handleFirebaseError(error, "Could not load more") };
   }
   if (snap.docs.length > 0) {
@@ -1844,8 +1791,7 @@ async function loadMore(collectionName) {
   if (collectionName === "projects") {
     result = result.filter((item) => !isProjectExpired(item));
   }
-  // A page can be fetched and then fully filtered out (all expired). That is NOT exhaustion —
-  // reporting "No more items" there hid live records further down the collection.
+  // A fully-filtered-out page is not exhaustion — saying so hides records further down.
   return {
     items: result,
     exhausted: snap.docs.length === 0,
@@ -1859,8 +1805,7 @@ async function loadAdminTab(tabName, lastDocId = null) {
   
   const map = {
     requests: "hostRequests",
-    // Both spellings are in use across the two consoles. "moderation" was previously
-    // unmapped, so the moderation queue silently returned zero rows forever.
+    // Both spellings are in use across the two consoles; an unmapped key returns zero rows.
     flags: "moderationFlags",
     moderation: "moderationFlags",
     users: "users",
@@ -1880,18 +1825,9 @@ async function loadAdminTab(tabName, lastDocId = null) {
     return { docs: [], lastDocId: null, error: `Unknown admin tab "${tabName}".` };
   }
 
-  /*
-   * Paged by document id, then sorted newest-first in the client.
-   *
-   * Deliberately NOT `orderBy("createdAt")`. Firestore excludes documents that do not have the
-   * ordered field, so any record written before createdAt was set would be permanently
-   * invisible to the admin — the same "the queue looks empty but isn't" failure the audit
-   * flagged, just moved. A try/catch cannot save us either: a missing field is not an error,
-   * the row is just silently dropped.
-   *
-   * Paging on __name__ (the implicit default order) needs no composite index and is stable, so
-   * every document is reachable. Only the within-page display order comes from createdAt.
-   */
+  // Deliberately NOT orderBy("createdAt"): Firestore drops documents missing the ordered
+  // field, which would hide legacy records from the admin, and a try/catch cannot detect it.
+  // Page on document id so everything is reachable; sort for display only.
   let cursor = null;
   if (lastDocId) {
     const docSnap = await getDoc(doc(db, colName, lastDocId)).catch(() => null);

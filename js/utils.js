@@ -1,7 +1,6 @@
 import { icons, state } from './state.js';
 import { isAllowedRvuEmail } from './auth.js';
 
-
 export async function promptUser(message, defaultValue = "") {
   return new Promise((resolve) => {
     const overlay = document.createElement("div");
@@ -101,10 +100,9 @@ window.alert = function(message) {
   document.body.appendChild(overlay);
   okBtn.focus();
 
-  // Escape must work from anywhere in the dialog, not just while the button has focus.
+  // Escape must work from anywhere in the dialog, not only while the button has focus.
   const onKeyDown = (e) => {
     if (e.key === "Escape" || e.key === "Enter") { e.preventDefault(); cleanup(); }
-    // Only one focusable control, so trap Tab on it.
     if (e.key === "Tab") { e.preventDefault(); okBtn.focus(); }
   };
   const cleanup = () => {
@@ -172,7 +170,6 @@ export function modalSelectField(id, labelText, opts, selected) {
   `;
 }
 
-
 export function inputField(name, label, value, type = "text") {
   return `
     <div class="field">
@@ -222,11 +219,7 @@ export function toDate(value) {
   return Number.isNaN(date?.getTime?.()) ? null : date;
 }
 
-/**
- * Human relative time from a createdAt value.
- * Announcements used to store the literal string "Just now" at create time, so every
- * announcement displayed "Just now" forever. Compute it at render time instead.
- */
+/** Relative time from createdAt. Compute at render — never store a formatted string. */
 export function formatRelativeTime(value, fallback = "") {
   const date = toDate(value);
   if (!date) return fallback;
@@ -276,17 +269,11 @@ export function eventDateParts(value) {
 }
 
 /**
- * Escape for both text and attribute contexts.
+ * Escape for text AND attribute contexts. Quotes must be escaped — this is interpolated into
+ * double-quoted attributes everywhere, and leaving them intact allows attribute breakout.
  *
- * Quotes MUST be escaped: this value is interpolated into double-quoted attributes
- * (data-title, value, href, src …) all over ui.js/admin.js/render-admin.js. The old
- * textContent -> innerHTML round-trip left " and ' intact, which allowed attribute
- * breakout and arbitrary event-handler injection from any user-writable field.
- *
- * Deliberately self-contained: this module sits in an import cycle
- * (utils -> auth -> ui -> utils), so escapeHtml can be called before this module's body
- * has finished evaluating. Referencing a module-level `const` lookup table here throws
- * "Cannot access '…' before initialization" and takes the whole app down at boot.
+ * Keep self-contained: this module is in an import cycle, so escapeHtml can run before the
+ * module body finishes. A module-level lookup table here throws at boot. Do not refactor.
  */
 export function escapeHtml(str) {
   if (typeof str !== "string") return str == null ? "" : String(str);

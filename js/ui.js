@@ -19,23 +19,13 @@ export function render() {
   }
 }
 
-/*
- * `var`, not `let`/`const`, on purpose.
- *
- * This module sits in an import cycle (ui -> main -> ui, ui -> auth -> ui) and render() runs
- * during that cycle, so focusOpenDialog() can execute before this module's body has finished
- * evaluating. `var` is hoisted and initialised to undefined; a `let`/`const` here throws
- * "Cannot access '…' before initialization" and the whole render falls into the error path.
- */
+// `var` on purpose: this module is in an import cycle and render() runs during it, so
+// focusOpenDialog() can execute before the module body finishes. `let`/`const` would throw
+// "Cannot access '…' before initialization" and break the whole render. Do not change.
 var FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
 var _trapHandler = null;
 
-/**
- * Move focus into the open dialog and keep Tab inside it.
- * The app re-renders by replacing innerHTML, so focus is lost on every render — without
- * this, keyboard and screen-reader users could not reach any modal's fields or its close
- * button, and Tab silently wandered into the page behind the overlay.
- */
+/** Move focus into the open dialog and trap Tab inside it. Re-run after every render. */
 export function focusOpenDialog() {
   if (_trapHandler) {
     document.removeEventListener("keydown", _trapHandler, true);
@@ -567,9 +557,7 @@ export function navButtons(withIcons) {
   if (isSuperAdmin()) {
     pendingCount = state.hostRequests.filter(r => r.status === "pending").length;
   } else if (isClubCore() && state.host.approved) {
-    // Club-core membership applications live in clubApplications, not hostRequests, and a
-    // club core cannot read other users' hostRequests at all — so counting hostRequests here
-    // made the badge permanently 0 and cores were never told an application was waiting.
+    // Membership applications live in clubApplications; a club core cannot read others' hostRequests.
     pendingCount = (state.clubApplicants || []).filter(a => (a.status || "pending") === "pending").length;
   }
   const badge = pendingCount > 0 ? `<span style="background:#e44;color:#fff;border-radius:50%;padding:2px 6px;font-size:10px;margin-left:6px;font-weight:bold;">${pendingCount}</span>` : "";
@@ -752,10 +740,8 @@ export function renderEvents() {
 }
 
 /**
- * True when two events come from the same host.
- * Club events are matched on clubId, school events on schoolId. Comparing `e.club === event.club`
- * matched every school event against every other, because school events have no `club` field at
- * all and `undefined === undefined` is true — so "More from this host" listed other schools.
+ * True when two events share a host. Match on clubId/schoolId, never on a display name or an
+ * absent field — `undefined === undefined` would make every school event match every other.
  */
 export function sameHost(a, b) {
   if (!a || !b) return false;
@@ -772,8 +758,7 @@ export function sameHost(a, b) {
 export function renderEventDetail() {
   const event = events.find(e => e.id === state.selectedEventId);
   if (!event) {
-    // A shared link to an event that has ended, been deleted, or is beyond the loaded page
-    // used to silently dump the user on the list with no explanation.
+
     return renderNotFound("Event not found", "This event may have ended, been removed, or is no longer listed.", "close-event-detail", "All events");
   }
 
@@ -883,8 +868,7 @@ export function renderClubs() {
 }
 
 export function renderClubDetail() {
-  // Never fall back to clubs[0]: a link to a deleted or unlisted club used to render a
-  // completely different club's page as though it were the requested one.
+  // Never fall back to clubs[0] — that renders a different club as if it were the requested one.
   const club = clubs.find((item) => item.slug === state.selectedClubSlug || item.id === state.selectedClubSlug);
   if (!club) {
     return renderNotFound("Club not found", "This club may have been removed, or is not approved for listing yet.", "back-to-clubs", "All clubs");
@@ -1018,11 +1002,7 @@ export function renderEditClubModal(club = {}) {
   `;
 }
 
-/**
- * Map a saved item's type to the action that opens it.
- * `open-${s.type}-detail` produced dead actions like "open-item-detail" / "open--detail"
- * whenever the stored type was the generic "item" or absent.
- */
+/** Map a saved item's type to a real action. Interpolating the type yields dead actions. */
 export function savedItemAction(type) {
   switch (String(type || "").toLowerCase()) {
     case "event": return "open-event-detail";
@@ -1034,11 +1014,8 @@ export function savedItemAction(type) {
 }
 
 /**
- * True when an announcement belongs to a school rather than a club.
- * Must depend on the ITEM, never on the editor's roles: gating the school picker on
- * isSchoolRep() meant a dual-role (club core + school rep) user editing a *club*
- * announcement got a school dropdown, and saving silently rewrote the club announcement's
- * source to a school name.
+ * True when an announcement belongs to a school rather than a club. Must depend on the ITEM,
+ * never the editor's roles, or a dual-role user editing a club announcement rewrites its source.
  */
 export function isSchoolAnnouncement(item) {
   if (!item) return false;
@@ -1437,7 +1414,6 @@ export function renderProfile() {
       </div>`).join("")
     : `<p style="font-size:13px;color:#756552;margin:0;padding:8px 0;">No clubs followed yet.</p>`;
 
-
   const clubAppsContent = state.clubApplications.length
     ? state.clubApplications.map(a => {
       const club = clubs.find(c => c.id === a.clubId) || { name: "Unknown Club" };
@@ -1528,9 +1504,7 @@ export function renderProfile() {
             <button style="background:none;border:1.5px solid #D7AC54;color:#8a6a2a;padding:9px 16px;min-height:40px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;" data-action="create-new-club-onboarding">Create new club</button>
           ` : ""}
           ${(() => {
-            // Do not offer the application to someone who already holds or has requested it.
-            // Re-submitting rewrote the canonical hostRequests/schoolRepresentative_{uid}
-            // grant back to pending, revoking a rep's own posting rights.
+            // Re-submitting rewrites the canonical grant back to pending, revoking their own access.
             if (isSchoolRep() && state.host.approved) {
               return `<span style="font-size:12px;color:#5a4a3a;font-family:inherit;padding:6px 0;">School rep for ${escapeHtml(state.host.school || state.user.school || "your school")}</span>`;
             }
@@ -1627,8 +1601,7 @@ export function renderProfileInterestsModal() {
 }
 
 export function renderClubApplyModal() {
-  // Exclude clubs the user is already core of, or already approved for — offering them meant
-  // Submit always failed with "You are already club core for this club."
+  // Exclude clubs the user already belongs to, or Submit always fails.
   const myEmail = String(state.authUser?.email || "").trim().toLowerCase();
   const alreadyCoreIds = new Set(
     (state.host.clubAccesses || []).map((a) => a.club?.id || a.club?.slug).filter(Boolean)
@@ -1729,13 +1702,11 @@ export function sectionLabel(number, label) {
   `;
 }
 
-
 export * from "./render-admin.js";
 
 export function renderEventCard(event) {
   const colors = event.colors || ["#233039", "#926d2f"];
-  // Real events store YYYY-MM-DD, so splitting on a space showed the raw ISO string in the
-  // poster block ("2026-08-20" instead of "Aug / 20"). eventDateParts handles both formats.
+  // eventDateParts handles both YYYY-MM-DD (real) and "May 22" (demo fixtures).
   const dateParts = event.date ? eventDateParts(event.date) : { month: "TBA", day: "" };
   const tags = event.tags || [];
   const isPast = event.past === true;
@@ -1749,8 +1720,7 @@ export function renderEventCard(event) {
     hostDisplay = schoolName;
   }
 
-  // safeUrl() returns "" for anything that is not http(s), so a javascript: link in the
-  // stored event never produces a button.
+  // safeUrl() returns "" for non-http(s), so a javascript: link produces no button.
   const joinUrl = safeUrl(event.link);
   const joinButton = joinUrl
     ? `<button style="background:#D7AC54;color:#1a1a1a;border:none;padding:9px 16px;min-height:40px;font-size:12px;font-weight:700;font-family:inherit;letter-spacing:0.05em;cursor:pointer;text-transform:uppercase;" data-action="open-external-link" data-url="${joinUrl}">Join</button>`
@@ -1847,8 +1817,7 @@ export function renderClubCard(club) {
 }
 
 export function renderProjectCard(project) {
-  // createProject stores lowercase "open"/"closed" (requireOneOf enforces it). Comparing
-  // against "Open" meant the Apply shortcut below never rendered for any project ever.
+  // Stored status is lowercase "open"/"closed" — compare case-insensitively.
   const isOpen = String(project.status || "open").toLowerCase() !== "closed";
   const statusLabel = isOpen ? "Open" : "Closed";
   const skills = project.skills || [];
@@ -2055,8 +2024,7 @@ export function renderOnboarding() {
 
   if (state.onboardingStep === "host-review") {
     const isClubRequest = state._onboardingIntent === "club-core";
-    // Name the clubs the applicant actually selected. activeClub() returns clubs[0] when
-    // nothing is set, so this used to confirm a club the user had never applied to.
+    // Name the clubs actually selected — activeClub() falls back to clubs[0].
     const selectedNames = (state.host.selectedClubIds || [])
       .map((id) => clubs.find((c) => (c.id || c.slug) === id))
       .filter(Boolean)
@@ -2078,5 +2046,4 @@ export function renderOnboarding() {
   }
   return "";
 }
-
 

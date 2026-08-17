@@ -63,7 +63,6 @@ async function promptUser(message, defaultValue = "") {
   });
 }
 
-
 const schools = [
   "School of Computer Science and Engineering",
   "School of Law",
@@ -168,12 +167,7 @@ function defaultReview() {
   return { title: "", collection: "events", targetId: "", note: "" };
 }
 
-/**
- * Escape for both text and attribute contexts. Quotes MUST be escaped — this value goes
- * into double-quoted attributes throughout the console, and student-supplied strings
- * (profile names, club names) reach them. Kept self-contained for the same reason as the
- * copy in js/utils.js. See that file for the full explanation.
- */
+/** Escape for text AND attribute contexts. Keep self-contained — see js/utils.js. */
 function escapeHtml(value) {
   if (value == null) return "";
   return String(value)
@@ -233,15 +227,8 @@ function downloadCSV(filename, rows) {
 }
 
 async function loadAdminData() {
-  /*
-   * This console shows LIVE PRODUCTION DATA ONLY.
-   *
-   * It used to pipe everything through applyDemoCampusData(), whose preferLive() helper
-   * substitutes sample-data.js fixtures whenever a live collection comes back empty. On a
-   * fresh database that meant the super admin saw fabricated users, clubs, events, flags and
-   * reviews presented as real records — and every approve/delete/grant action fired against
-   * invented ids like "demo-club-ai-forge". Never merge fixtures in here.
-   */
+  // LIVE PRODUCTION DATA ONLY. Never route this through applyDemoCampusData — its preferLive()
+  // substitutes fixtures for any empty collection, so admins would act on invented ids.
   const campusData = await window.RVUFirebase.loadCampusData({ superAdmin: true });
 
   let liveHostRequests = [];
@@ -698,8 +685,7 @@ function renderAnnouncements() {
 }
 
 function announcementRow(item) {
-  // Both directions must exist. With only Unpublish, moving an announcement to draft was
-  // irreversible from the console and the only way back was deleting it.
+  // Both directions must exist, or moving to draft is irreversible from the console.
   return row(item.title, `${item.source || "RVU"} · ${item.tag || "Update"} · ${item.status || "unknown"}`, `
     ${item.status === "published"
       ? `<button class="mini-btn" data-action="unpublish-announcement" data-id="${item.id}">Unpublish</button>`
@@ -735,8 +721,7 @@ function renderProjects() {
 }
 
 function projectRow(project) {
-  // Applications are handled off-platform via the project's own applicationLink, so there is
-  // no applicant queue to review or export here.
+  // Applications are off-platform via the project's applicationLink — no queue to review here.
   const applyLink = safeUrl(project.applicationLink);
   return row(project.title, `${(project.tags || []).join(", ") || "No tags"} · ${project.status || "open"} · ${project.postedBy || "unknown poster"}`, `
     ${applyLink ? `<a class="mini-btn" href="${applyLink}" target="_blank" rel="noopener noreferrer">Apply link ↗</a>` : ""}
@@ -758,9 +743,7 @@ function renderUsers() {
 }
 
 function userRow(user) {
-  // Show the Auth UID and let the admin copy it straight into the Role Manager. The role
-  // form requires a UID, but the directory never displayed one anywhere, so no role could
-  // actually be granted through the UI.
+  // The Role Manager needs a UID, so surface it here rather than making the admin hunt for it.
   const uid = user.uid || user.id || "";
   return row(
     user.name || user.email || user.id,
@@ -972,13 +955,8 @@ async function handleAction(action, id, dataset = {}) {
   if (action === "update-club-profile") {
     const profile = state.forms.clubProfile;
     if (!profile.clubId) return window.alert("Choose a club first.");
-    /*
-     * Only write the fields the admin actually filled in.
-     *
-     * This form starts blank, so submitting it used to blank out the club's existing logo,
-     * banner, socials and highlights, and force-close registration — a club that had set all
-     * of that up lost it the moment an admin saved any single change here.
-     */
+    // Only write fields the admin actually filled in — this form starts blank, so writing
+    // everything would wipe the club's existing profile on any single edit.
     const patch = {};
     const setIfFilled = (key, value) => { if (value !== "") patch[key] = value; };
     setIfFilled("logoUrl", profile.logoUrl.trim());
@@ -1069,7 +1047,6 @@ async function handleAction(action, id, dataset = {}) {
     showToast("School created.");
     return;
   }
-  // Prefill the Role Manager from the directory so the admin never has to hunt for a UID.
   if (action === "use-uid-for-role") {
     state.forms.role = { ...defaultRoleGrant(), uid: id || "", email: dataset.email || "" };
     state.tab = "roles";
@@ -1084,8 +1061,7 @@ async function handleAction(action, id, dataset = {}) {
     try {
       await window.RVUFirebase.grantPlatformRole(grant);
     } catch (error) {
-      // clubCore / schoolRepresentative are scoped grants and are refused here on purpose —
-      // surface the explanation rather than a silent failure.
+      // Scoped grants are refused here on purpose — surface why, do not fail silently.
       return window.alert(error.message || "Could not update the role.");
     }
     state.forms.role = defaultRoleGrant();
@@ -1173,11 +1149,8 @@ async function handleAction(action, id, dataset = {}) {
     showToast("Project created.");
     return;
   }
-  // "project-application-status" and "export-project-applicants" were removed along with
-  // their buttons. There is no in-app project application workflow: students apply through
-  // the project's external applicationLink, so projects/{id}/applications is never written
-  // (and has no Firestore rule). The handlers called updateProjectApplicationStatus /
-  // getProjectApplicants, neither of which exists — both threw a TypeError on click.
+  // No project-application handlers: applications are off-platform, so
+  // projects/{id}/applications is never written and has no Firestore rule.
   if (action === "export-users") {
     downloadCSV("rvuconnect_users.csv", state.data.allUsers);
     return;
@@ -1214,8 +1187,7 @@ function bindEvents() {
       const tab = button.dataset.tab;
       state.tab = tab;
 
-      // Keys MUST match the data-tab ids used in the rail. "moderation" was missing, so the
-      // moderation queue never loaded and always rendered as empty.
+      // Keys MUST match the data-tab ids in the rail, or that tab silently never loads.
       const mapping = {
         requests: "hostRequests",
         moderation: "moderationFlags",

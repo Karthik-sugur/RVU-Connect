@@ -250,12 +250,8 @@ p {
   background: linear-gradient(180deg, var(--ink) 0, var(--ink-soft) 150px, var(--paper) 150px);
 }
 
-/*
- * Demo-mode banner. Sits directly under the sticky topbar.
- * It previously used an inline `top: 56px`, which is shorter than the topbar itself
- * (76px desktop / 64px mobile), so the banner overlapped the header on every screen.
- * Driven off the same custom property as the topbar height so the two cannot drift.
- */
+/* Demo-mode banner, pinned under the sticky topbar. Offset comes from --topbar-h so the
+   two cannot drift apart and overlap. */
 :root {
   --topbar-h: 76px;
 }

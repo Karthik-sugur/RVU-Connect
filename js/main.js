@@ -312,8 +312,7 @@ export async function handleAction(action, dataset) {
     renderAtTop();
     return;
   }
-  // Onboarding steps previously had no way back, so picking "Club core" trapped the user
-  // in the host-info modal with no exit and no way to finish.
+  // Every onboarding step needs a way back, or the host path is a dead end.
   if (action === "back-to-role") {
     state.onboardingStep = "role";
     renderAtTop();
@@ -354,9 +353,8 @@ export async function handleAction(action, dataset) {
           roleTitle: state.host.roleTitle,
         });
       } catch (error) {
-        // "You already have a pending application" is not a failure the user can act on —
-        // it means the request is already in. Treat it as success and let them out of
-        // onboarding instead of trapping them in a modal that can never be satisfied.
+        // "Already pending" means the request is in — treat it as success, not an error the
+        // user must resolve, or onboarding can never be satisfied.
         const message = error.message || "";
         const alreadySubmitted = /already have a pending application|already approved|already club core/i.test(message);
         if (!alreadySubmitted) {
@@ -366,7 +364,6 @@ export async function handleAction(action, dataset) {
         window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Your application is already in review.", type: "info" } }));
       }
     }
-    // Record that onboarding is finished so the blocking role modal does not reopen.
     if (window.RVUFirebase && state.authUser) {
       window.RVUFirebase.saveUserProfile(state.authUser.uid, { onboardingComplete: true })
         .catch((error) => console.warn("[RVU] Could not persist onboardingComplete", error));
@@ -416,8 +413,7 @@ export async function handleAction(action, dataset) {
     return;
   }
   if (action === "open-club") {
-    // navigate() -> renderCurrentRoute() already loads this club's core team (and does it
-    // for deep links and reloads too). Fetching here as well ran the query twice per click.
+    // renderCurrentRoute already loads the core team, including for deep links and reloads.
     navigate("clubs", { clubSlug: dataset.club });
     return;
   }
@@ -726,9 +722,7 @@ export async function handleAction(action, dataset) {
       window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Poster URL must start with http:// or https://", type: "info" } }));
       return;
     }
-    // An event whose date+time has already passed is filtered out of every listing, so it
-    // would look published to its host while being invisible to every student. Reject it up
-    // front instead of creating a record nobody can see.
+    // A past event is filtered out of every listing — it would look published but be invisible.
     if (!isFutureDateTime(date, time)) {
       window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Event date and time must be in the future.", type: "info" } }));
       return;
@@ -942,14 +936,11 @@ export async function handleAction(action, dataset) {
     renderAtTop();
   }
 
-
   if (action === "load-more") {
     if (!window.RVUFirebase) return;
     const collectionName = dataset.collection;
     const result = await window.RVUFirebase.loadMore(collectionName);
-    // loadMore reports three distinct outcomes so the message matches reality: it used to
-    // say "No more items to load" both when the query failed and when a fetched page was
-    // entirely filtered out as expired, hiding live records further down the collection.
+    // Three distinct outcomes: failed, exhausted, or a page that filtered out entirely.
     if (result.error) return; // handleFirebaseError already surfaced a toast
     const newItems = result.items || [];
     if (!newItems.length) {
@@ -1025,9 +1016,8 @@ export async function handleAction(action, dataset) {
     renderAtTop();
     return;
   }
-  // Detail views go through navigate() so they get a URL and a history entry. Setting the
-  // selected id and re-rendering directly meant detail pages were not shareable, and Back
-  // skipped the list entirely — it went to whatever route was visited before it.
+  // Detail views must go through navigate() for a URL and a history entry — otherwise they
+  // are not shareable and Back skips the list.
   if (action === "open-project-detail") {
     navigate("projects", { projectId: dataset.docid });
     return;
@@ -1085,9 +1075,8 @@ export async function handleAction(action, dataset) {
       imageUrl: imageUrl || null,
     };
     if (tag) patch.tag = tag;
-    // Only rewrite the school fields on an announcement that actually belongs to a school.
-    // The picker is now hidden for club announcements, but guard the write too so a stale
-    // DOM node can never reassign a club announcement to a school.
+    // Guard the write as well as the picker, so a stale DOM node cannot reassign a club
+    // announcement to a school.
     const existing = announcements.find((a) => a.id === state.editAnnouncementId);
     if (school && isSchoolAnnouncement(existing)) {
       patch.schoolId = school;
@@ -1353,9 +1342,7 @@ export async function handleAction(action, dataset) {
     return;
   }
   if (action === "ep-year") {
-    // Preserve whatever the user has already typed. This re-renders the whole app, so
-    // without capturing the open fields first, picking a year silently discarded the
-    // Display Name and School the user had just entered.
+    // This re-renders the whole app, so capture the open fields or they are discarded.
     const typedName = document.getElementById("ep-name")?.value;
     const typedSchool = document.getElementById("ep-school")?.value;
     if (typedName !== undefined && typedName !== null) state.user.name = typedName;
@@ -1490,7 +1477,6 @@ export async function handleAction(action, dataset) {
     return;
   }
 
-
   if (action === "load-club-applicants") {
     if (!window.RVUFirebase) return;
     let clubIds = dataset.club
@@ -1555,8 +1541,7 @@ export async function handleAction(action, dataset) {
     return;
   }
   if (action === "open-external-link") {
-    // Only http(s). A club joinLink or event link is user-supplied, and window.open()
-    // will happily execute a javascript: URL in the current document.
+    // http(s) only — window.open() will execute a javascript: URL in the current document.
     const url = String(dataset.url || "").trim();
     if (!url) return;
     if (!/^https?:\/\//i.test(url)) {

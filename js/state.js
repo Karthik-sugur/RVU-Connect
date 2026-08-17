@@ -102,8 +102,7 @@ export const state = {
     clubCategory: "All",
     clubSchool: "All",
     announcementType: "All",
-    // Must be declared here: the change handler only assigns filters that already exist on
-    // this object, so an undeclared filter silently never applies.
+    // Must be declared — the change handler only assigns filters already on this object.
     announcementTag: "All",
     projectTag: "All",
   },
@@ -116,8 +115,7 @@ export const state = {
   savedItems: [],
   followedClubs: [],
   rsvps: [],
-  // Read unguarded by the Home page. Without a default here, any failure before the first
-  // sync assigned it threw and replaced the whole app with a blank screen.
+  // Read unguarded by the Home page — a missing default blanks the whole app.
   myApplications: [],
   siteSettings: [],
   loadErrors: [],

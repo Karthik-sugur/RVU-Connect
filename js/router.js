@@ -2,11 +2,7 @@ import { state } from './state.js';
 import { renderAtTop } from './ui.js';
 import { isClubCore, isSuperAdmin } from './auth.js';
 
-/**
- * Drop the cached "already loaded" marker for admin tabs so the next render re-reads them.
- * Call after approving/rejecting/deleting, otherwise the admin keeps acting on stale rows.
- * With no argument, invalidates every tab.
- */
+/** Drop the cached load marker so the next render re-reads. No argument invalidates all tabs. */
 export function invalidateAdminTab(tab) {
   if (!state._adminTabsLoaded) return;
   if (tab) delete state._adminTabsLoaded[tab];
@@ -85,10 +81,8 @@ export async function renderCurrentRoute() {
 
   if (state.route === "admin" && window.RVUFirebase) {
     const tab = state.adminTab || "requests";
-    // Track which tabs have been fetched. Keying off "the array is empty" re-fetched a
-    // genuinely empty queue on every single render, while never refreshing a stale
-    // non-empty one. state._adminTabsLoaded is cleared by refreshAdminTab() after a
-    // mutation so the next visit re-reads.
+    // Track which tabs were fetched. Keying off "array is empty" re-fetches an empty queue
+    // on every render and never refreshes a stale one. Cleared by invalidateAdminTab().
     if (!state._adminTabsLoaded) state._adminTabsLoaded = {};
     const needsLoad = ["requests", "flags", "users", "events", "announcements", "contentReviews"].includes(tab)
       && !state._adminTabsLoaded[tab];
@@ -170,9 +164,8 @@ export function anyOverlayOpen() {
 
 export function initRouter() {
   window.addEventListener("popstate", (e) => {
-    // Back/Escape should dismiss an overlay rather than mutate the page behind it. Previously
-    // the route changed underneath and the modal stayed floating over a different screen,
-    // which on Android/iOS left the user with no way out.
+    // Dismiss an overlay rather than mutating the page behind it, which leaves a modal
+    // floating over a different screen with no way out.
     if (closeTopOverlay()) {
       // Keep the URL where it was — we consumed this Back for the overlay.
       window.history.pushState(
