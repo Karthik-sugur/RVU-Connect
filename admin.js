@@ -666,7 +666,6 @@ function eventRow(event) {
   const label = event.status === "published" ? "Unpublish" : "Publish";
   return row(event.title, `${event.host || event.club || "RVU"} · ${event.date || "No date"} · ${event.status || "unknown"}`, `
     <button class="mini-btn" data-action="${action}" data-id="${event.id}">${label}</button>
-    <button class="mini-btn" data-action="export-rsvps" data-id="${event.id}">Export RSVPs</button>
     <button class="mini-btn danger" data-action="delete-event" data-id="${event.id}">Delete</button>
   `);
 }
@@ -1181,11 +1180,6 @@ async function handleAction(action, id, dataset = {}) {
   // getProjectApplicants, neither of which exists — both threw a TypeError on click.
   if (action === "export-users") {
     downloadCSV("rvuconnect_users.csv", state.data.allUsers);
-    return;
-  }
-  if (action === "export-rsvps") {
-    const rsvps = await window.RVUFirebase.getEventRSVPs(id);
-    downloadCSV(`event_${id}_rsvps.csv`, rsvps);
     return;
   }
   if (action === "toggle-suspend-user") {

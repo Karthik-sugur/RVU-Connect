@@ -6,7 +6,7 @@
  *
  * These cover the escalation and access holes found in the pre-launch QA audit
  * (see QA-REPORT.md): the users/{uid} create whitelist, the @rvu.edu.in domain
- * gate, core-member roster reads, and the RSVP write paths.
+ * gate, core-member roster reads, and the rsvps subcollection ownership rules.
  */
 const fs = require("fs");
 const path = require("path");
@@ -141,31 +141,42 @@ async function main() {
   await it("still blocks a non-RVU account from the roster", () =>
     assertFails(getDocs(collection(asOutsider, "clubs", "club-a", "coreMembers"))));
 
-  console.log("\nRSVP write paths (QA finding: RSVP had no writer)");
+  // Attendance is off-platform (events carry an external Join link), so the app neither reads
+  // nor writes these. The owner-only rules are still asserted so pre-existing data stays
+  // reachable by its owner and by nobody else.
+  console.log("\nrsvps subcollections — owner-only, unused by the app");
 
-  await it("lets a student write their own event RSVP", () =>
+  await it("lets a student write their own event RSVP doc", () =>
     assertSucceeds(setDoc(doc(asRvu, "events", "evt-club", "rsvps", RVU.sub), {
       uid: RVU.sub, email: RVU.email, status: "going",
     })));
 
-  await it("lets a student mirror the RSVP under their own profile", () =>
-    assertSucceeds(setDoc(doc(asRvu, "users", RVU.sub, "rsvps", "evt-club"), {
-      eventId: "evt-club", title: "Build Night", status: "going",
-    })));
-
-  await it("blocks writing an RSVP as another user", () =>
+  await it("blocks writing an RSVP doc as another user", () =>
     assertFails(setDoc(doc(asRvu2, "events", "evt-club", "rsvps", RVU.sub), {
       uid: RVU.sub, status: "going",
     })));
 
-  await it("lets a student delete their own RSVP", () =>
+  await it("blocks a non-host, non-owner from reading someone else's RSVP doc", () =>
+    assertFails(getDoc(doc(asRvu2, "events", "evt-club", "rsvps", RVU.sub))));
+
+  await it("lets a student delete their own RSVP doc", () =>
     assertSucceeds(deleteDoc(doc(asRvu, "events", "evt-club", "rsvps", RVU.sub))));
 
-  await it("lets the hosting club core read the event's RSVP list", () =>
-    assertSucceeds(getDocs(collection(asCore, "events", "evt-club", "rsvps"))));
+  console.log("\nclub-core scoping — a core of one club cannot edit another");
 
-  await it("lets a super admin read the event's RSVP list", () =>
-    assertSucceeds(getDocs(collection(asAdmin, "events", "evt-club", "rsvps"))));
+  await it("lets an approved club core edit its own club", () =>
+    assertSucceeds(updateDoc(doc(asCore, "clubs", "club-a"), { tagline: "Build things" })));
+
+  await it("blocks an ordinary student from editing a club", () =>
+    assertFails(updateDoc(doc(asRvu, "clubs", "club-a"), { tagline: "hacked" })));
+
+  await it("blocks an ordinary student from creating a club", () =>
+    assertFails(setDoc(doc(asRvu, "clubs", "club-new"), { name: "Mine", status: "approved" })));
+
+  await it("blocks a club core from approving their own membership application", () =>
+    assertFails(setDoc(doc(asRvu, "clubApplications", `club-a_${RVU.sub}`), {
+      uid: RVU.sub, email: RVU.email, clubId: "club-a", status: "approved",
+    })));
 
   console.log("\nhostRequests — self-approval must stay blocked");
 

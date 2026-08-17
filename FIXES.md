@@ -3,7 +3,7 @@
 Companion to [QA-REPORT.md](QA-REPORT.md). Every confirmed finding is addressed. Nothing was
 deferred; where a finding needed a product decision, the decision taken is stated.
 
-**Verification:** `npm test` → 19 ES modules parse + 24 Firestore rules tests pass against the
+**Verification:** `npm test` → 19 ES modules parse + 26 Firestore rules tests pass against the
 emulator. The XSS, routing, filtering and mobile fixes were additionally reproduced live in a
 browser.
 
@@ -14,7 +14,7 @@ browser.
 | Question | Decision | Consequence |
 |---|---|---|
 | Email domain — the code contradicted itself three ways | **RVU-only everywhere** | `firestore.rules` now enforces `@rvu.edu.in`, closing the hole where any Google account could read the entire campus dataset. `js/auth.js` `isAllowedRvuEmail` now agrees with `services.js` and `admin.js`. |
-| RSVP and in-app project applications were advertised but had no writer | **Built RSVP; dropped in-app project applications** | RSVP is fully implemented (the rules and subcollections already existed). Projects keep the external `applicationLink` model; the dead accept/reject and Export Applicants controls are gone and the README no longer claims an in-app queue. |
+| RSVP and in-app project applications were advertised but had no writer | **Dropped both; attendance and applications are off-platform** | Events use the **Join** button, which opens the external registration link entered at creation time — the behaviour that predated the audit. RSVP was briefly implemented and then removed at your request, along with its displays and the always-empty Export RSVPs. Projects keep the external `applicationLink` model; the dead accept/reject and Export Applicants controls are gone. |
 
 ---
 
@@ -88,7 +88,7 @@ success rather than an error that traps the user.
 
 | Fix | Where |
 |---|---|
-| RSVP implemented end to end — `setEventRsvp` / `removeEventRsvp` write both `events/{id}/rsvps/{uid}` and `users/{uid}/rsvps/{eventId}`; Going/Interested controls on cards and detail, optimistic update with rollback | `js/services.js`, `js/main.js`, `js/ui.js` |
+| **Join** restored as the primary event action, gated on a valid `http(s)` link via `safeUrl()` so a `javascript:` link renders no button; added to announcement cards too | `js/ui.js` |
 | School-rep approval is revocable — `revokeHostGrants()` clears the sticky flags and canonical request on rejection; `updateUserRole('student')` clears them too | `js/services.js` |
 | Dual-role users no longer corrupt club announcements — the school picker is gated on the *item*, not the editor's roles, and the write is guarded | `js/ui.js`, `js/main.js` |
 | `grantPlatformRole` no longer creates permanently-broken users — scoped roles are refused with an explanation instead of writing a bare `users.role` | `js/services.js` |
@@ -96,7 +96,7 @@ success rather than an error that traps the user.
 | Core team roster visible to ordinary students | `firestore.rules` |
 | Club profile editor no longer wipes logo/banner/socials/highlights or force-closes registration — only filled fields are written | `admin.js` |
 | Announcements can be re-published; unpublish is no longer one-way | `admin.js` |
-| Admin lists ordered newest-first with a fallback, and report `hasMore` | `js/services.js` |
+| Admin lists page deterministically by document id and sort newest-first in the client, and report `hasMore` | `js/services.js` |
 | Past-dated events rejected at creation | `js/main.js` |
 | Real chronological event sorting — `sort` was hard-coded to 999 | `js/auth.js` |
 | The 12-second poller no longer destroys open forms or fires false "approved" toasts | `js/auth.js` |
@@ -151,3 +151,40 @@ success rather than an error that traps the user.
   passing test.
 - **App Check 403s on localhost** are expected (the debug token is not registered) and were out
   of scope per the original brief.
+
+---
+
+## Follow-up: RSVP reverted to Join
+
+Requested after the first pass. RSVP is gone from the product again and attendance is handled by
+whatever the event's external Join link points to.
+
+| Change | Where |
+|---|---|
+| Removed the Going/Interested controls, `rsvpFor()` and `renderRsvpControls()` | `js/ui.js` |
+| Removed the `rsvp-event` / `cancel-rsvp` handler | `js/main.js` |
+| Removed `setEventRsvp` / `removeEventRsvp` and their exports | `js/services.js` |
+| Removed the RSVP displays (profile list, Home "My Campus" tiles, recent activity) — a display for data nothing can create is the same defect the audit flagged | `js/ui.js` |
+| Removed the always-empty "Export RSVPs" and the now-dead `getEventRSVPs` reader | `admin.js`, `js/services.js` |
+| **Join** is the primary gold action on the event detail and cards, and now also on announcement cards | `js/ui.js` |
+| Join only renders for a valid `http(s)` link (`safeUrl`), so a stored `javascript:` URL produces no button | `js/ui.js` |
+| Reverted the `events/{id}/rsvps` host-read rule branch — owner-only again, since nothing writes them | `firestore.rules` |
+| Rules tests updated: rsvps assertions now cover owner-only access; added four club-scoping tests. **26/26 pass** | `tests/firestore.rules.test.js` |
+| Gave the demo fixtures a `link` on every event and announcement, so Join is demonstrable in demo mode (previously no fixture had a link, so the button never appeared) | `sample-data.js` |
+| README reverted to describe Join, not RSVP | `README.md` |
+
+### Two data-visibility bugs found while auditing the deploy
+
+Both came out of checking the queries against the index definitions, and both would have hidden
+real records in production:
+
+1. **`orderBy("createdAt")` silently excludes documents that lack the field.** The admin queues
+   ordered server-side, so any record written before `createdAt` existed would have been
+   permanently invisible — the same "queue looks empty but isn't" failure the audit flagged, just
+   relocated. A `try/catch` cannot catch it, because a missing field is not an error. The queues
+   now page by document id and sort by date client-side via `sortByCreatedAtDesc()`. Same fix for
+   the moderation-flag load.
+2. **A missing composite index.** `removeClubCoreRole`'s fallback queries `clubApplications` by
+   `clubId + email + status`, which had no index. Added to `firestore.indexes.json`.
+
+See [FIRESTORE-DEPLOY.md](FIRESTORE-DEPLOY.md) for the deploy steps and the lockout warning.

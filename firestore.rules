@@ -256,14 +256,12 @@ service cloud.firestore {
         || (resource.data.hostType == 'club' && isApprovedClubCore(resource.data.clubId))
         || (resource.data.hostType == 'school' && isApprovedSchoolRep());
 
+      // Attendance is handled off-platform: events carry an external `link` and the app shows a
+      // Join button that opens it. Nothing in the app reads or writes these documents, so the
+      // rules stay owner-only rather than granting host reads for a queue that is never filled.
+      // Kept (not removed) so any pre-existing rsvps data stays reachable by its owner.
       match /rsvps/{uid} {
-        // Own RSVP, the event's host (so they can see who is coming), or a super admin.
-        allow read: if isSuperAdmin()
-          || createsOwnDoc(uid)
-          || (get(/databases/$(database)/documents/events/$(eventId)).data.hostType == 'club'
-              && isApprovedClubCore(get(/databases/$(database)/documents/events/$(eventId)).data.clubId))
-          || (get(/databases/$(database)/documents/events/$(eventId)).data.hostType == 'school'
-              && isApprovedSchoolRep());
+        allow read: if isSuperAdmin() || createsOwnDoc(uid);
         allow create, update, delete: if isRvuEmail() && createsOwnDoc(uid);
       }
     }

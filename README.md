@@ -122,13 +122,13 @@ The platform implements a hierarchical role system with four tiers:
 │  Club events · Announcements · Member management    │
 ├─────────────────────────────────────────────────────┤
 │                  Student                            │
-│  Browse · RSVP · Save · Follow · Post projects       │
+│  Browse · Join · Save · Follow · Post projects       │
 └─────────────────────────────────────────────────────┘
 ```
 
 | Role | Permissions | Assignment |
 |---|---|---|
-| **Student** | View clubs/events/announcements, RSVP to events, post projects, save content, follow clubs | Default for all new users |
+| **Student** | View clubs/events/announcements, join via event links, post projects, save content, follow clubs | Default for all new users |
 | **Club Core Member** | Create events & announcements, manage club info, control registrations | Host Request → Admin Approval |
 | **School Representative** | Publish school updates, create events, manage school-level communication | Host Request → Admin Approval |
 | **Super Admin** | Create clubs, approve requests, moderate content, manage users, configure site settings | System-assigned |
@@ -148,7 +148,10 @@ The platform implements a hierarchical role system with four tiers:
 
 - **Event Creation** — Authorized hosts create club or school events with full details (title, description, date, time, location, tags)
 - **Event Discovery** — Browse, search, and filter events across campus
-- **RSVP System** — Students mark **Going** or **Interested**; the RSVP is written to both `events/{id}/rsvps/{uid}` and `users/{uid}/rsvps/{eventId}`, and hosts can export their event's attendee list
+- **Join Link** — Every event carries an external registration link (a Google Form or similar) entered at creation time. Students press **Join** on the card or detail page and it opens in a new tab.
+
+> **Note:** attendance is tracked off-platform in whatever the Join link points to. There is no
+> in-app RSVP or attendee list.
 
 ---
 
@@ -258,7 +261,6 @@ Organizations can publish:
 users/{uid}/
   ├── savedItems          # Bookmarked content
   ├── followedClubs       # Club subscriptions
-  ├── rsvps               # Event RSVPs
   └── applications        # Project applications
 
 events/{eventId}/
@@ -358,7 +360,7 @@ boundaries that matter most:
 | Role integrity | A user cannot create their profile as `superAdmin`, or change their own `role` |
 | Domain gate | Non-`@rvu.edu.in` and unauthenticated accounts cannot read campus data |
 | Club rosters | Ordinary students can read a club's core team; outsiders cannot |
-| RSVPs | A student may write only their own RSVP; hosts and admins may read the event's list |
+| Club scoping | An approved club core may edit only its own club; students may not edit or create clubs, nor approve their own membership application |
 | Host requests | A user may only ever write `status: 'pending'` to their own request — no self-approval |
 
 ---
@@ -424,7 +426,7 @@ rvuconnect-main/
 | ✅ | Authentication & Onboarding | Complete |
 | ✅ | Role Management System | Complete |
 | ✅ | Club Management | Complete |
-| ✅ | Event System & RSVP | Complete — going / interested, stored per event and per user |
+| ✅ | Event System & Join Links | Complete |
 | ✅ | Announcement Publishing | Complete |
 | ✅ | Project Collaboration | Complete |
 | ✅ | Content Moderation | Complete |

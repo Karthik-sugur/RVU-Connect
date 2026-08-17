@@ -278,6 +278,21 @@ function collectedLoadErrors() {
   return _loadErrors.slice();
 }
 
+/**
+ * Newest-first by createdAt, with undated documents last rather than dropped.
+ * Used instead of a Firestore orderBy wherever completeness matters more than server-side
+ * ordering — see loadAdminTab for why.
+ */
+function sortByCreatedAtDesc(list) {
+  const ms = (row) => {
+    const value = row?.createdAt;
+    const date = value?.toDate ? value.toDate() : (value ? new Date(value) : null);
+    const time = date?.getTime?.();
+    return Number.isFinite(time) ? time : -Infinity;
+  };
+  return [...(list || [])].sort((a, b) => ms(b) - ms(a));
+}
+
 async function rowsOrEmpty(label, promise) {
   try {
     return rows(await promise);
@@ -568,10 +583,9 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
   if (auth.currentUser?.email) {
     const email = auth.currentUser.email.trim().toLowerCase();
     const uid = auth.currentUser.uid;
-    const [savedRows, followRows, rsvpRows, clubAppRows] = await Promise.all([
+    const [savedRows, followRows, clubAppRows] = await Promise.all([
       rowsOrEmpty("saved items", getDocs(query(collection(db, "users", uid, "savedItems"), limit(50)))),
       rowsOrEmpty("followed clubs", getDocs(query(collection(db, "users", uid, "followedClubs"), limit(50)))),
-      rowsOrEmpty("event RSVPs", getDocs(query(collection(db, "users", uid, "rsvps"), limit(50)))),
       rowsOrEmpty("club applications", getDocs(query(collection(db, "clubApplications"), where("uid", "==", uid), limit(20)))),
     ]);
     const ownHostRequests = await rowsOrEmpty("host requests", getDocs(query(collection(db, "hostRequests"), where("uid", "==", uid), limit(50))));
@@ -689,7 +703,6 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
     data.hostRequests = ownHostRequests;
     data.savedItems = savedRows;
     data.followedClubs = followRows;
-    data.rsvps = rsvpRows;
     data.clubApplications = clubAppRows;
   }
 
@@ -700,11 +713,14 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
     const [allClubRows, allSchoolRows, flagRows] = await Promise.all([
       rowsOrEmpty("all clubs", getDocs(query(collection(db, "clubs"), limit(100)))),
       rowsOrEmpty("all schools", getDocs(query(collection(db, "schools"), limit(100)))),
-      rowsOrEmpty("moderation flags", getDocs(query(collection(db, "moderationFlags"), orderBy("createdAt", "desc"), limit(ADMIN_PAGE_SIZE)))),
+      // Unordered on purpose. A Firestore orderBy silently EXCLUDES documents that lack the
+      // field, so ordering by createdAt would hide any legacy flag written without it — and a
+      // moderation queue that hides reports is worse than one in arbitrary order. Sorted below.
+      rowsOrEmpty("moderation flags", getDocs(query(collection(db, "moderationFlags"), limit(ADMIN_PAGE_SIZE)))),
     ]);
     data.allClubs = allClubRows;
     data.allSchools = allSchoolRows;
-    data.moderationFlags = flagRows;
+    data.moderationFlags = sortByCreatedAtDesc(flagRows);
   }
 
   data.loadErrors = collectedLoadErrors();
@@ -1567,57 +1583,6 @@ async function flagContent(payload) {
   return ref.id;
 }
 
-async function getEventRSVPs(eventId) {
-  const snap = await getDocs(collection(db, "events", eventId, "rsvps"));
-  return rows(snap);
-}
-
-const RSVP_STATUSES = ["going", "interested"];
-
-/**
- * Record the signed-in user's RSVP for an event.
- * Written to both locations the app reads from: events/{id}/rsvps/{uid} is the attendance
- * record the host and admins read, users/{uid}/rsvps/{eventId} is the copy the student's
- * own profile lists. Both paths are permitted by firestore.rules for the owner.
- */
-async function setEventRsvp(event, status = "going") {
-  const user = auth.currentUser;
-  if (!user) throw new Error("Sign in to RSVP.");
-  const eventId = typeof event === "string" ? event : event?.id;
-  if (!eventId) throw new Error("Event id required.");
-  requireOneOf(status, RSVP_STATUSES, "RSVP status");
-
-  const email = String(user.email || "").trim().toLowerCase();
-  const title = (typeof event === "object" && event?.title) || "";
-
-  await tracedSetDoc(doc(db, "events", eventId, "rsvps", user.uid), {
-    uid: user.uid,
-    email,
-    name: user.displayName || email.split("@")[0],
-    status,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  }, { merge: true });
-
-  await tracedSetDoc(doc(db, "users", user.uid, "rsvps", eventId), {
-    eventId,
-    title,
-    status,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  }, { merge: true });
-
-  return { id: eventId, eventId, title, status };
-}
-
-/** Withdraw the signed-in user's RSVP from both locations. */
-async function removeEventRsvp(eventId) {
-  const user = auth.currentUser;
-  if (!user) throw new Error("Sign in first.");
-  if (!eventId) throw new Error("Event id required.");
-  await tracedDeleteDoc(doc(db, "events", eventId, "rsvps", user.uid));
-  await tracedDeleteDoc(doc(db, "users", user.uid, "rsvps", eventId));
-}
 
 // ── Club Application functions ──
 
@@ -1915,16 +1880,18 @@ async function loadAdminTab(tabName, lastDocId = null) {
     return { docs: [], lastDocId: null, error: `Unknown admin tab "${tabName}".` };
   }
 
-  // Order newest-first so a paged queue is stable and the first page is the page that matters.
-  // Without an orderBy the "first 50 by document id" is effectively random, which made queues
-  // look empty or complete when they were neither.
-  const buildQuery = (cursor) => {
-    const clauses = [orderBy("createdAt", "desc")];
-    if (cursor) clauses.push(startAfter(cursor));
-    clauses.push(limit(ADMIN_PAGE_SIZE));
-    return query(collection(db, colName), ...clauses);
-  };
-
+  /*
+   * Paged by document id, then sorted newest-first in the client.
+   *
+   * Deliberately NOT `orderBy("createdAt")`. Firestore excludes documents that do not have the
+   * ordered field, so any record written before createdAt was set would be permanently
+   * invisible to the admin — the same "the queue looks empty but isn't" failure the audit
+   * flagged, just moved. A try/catch cannot save us either: a missing field is not an error,
+   * the row is just silently dropped.
+   *
+   * Paging on __name__ (the implicit default order) needs no composite index and is stable, so
+   * every document is reachable. Only the within-page display order comes from createdAt.
+   */
   let cursor = null;
   if (lastDocId) {
     const docSnap = await getDoc(doc(db, colName, lastDocId)).catch(() => null);
@@ -1933,21 +1900,15 @@ async function loadAdminTab(tabName, lastDocId = null) {
 
   let snap;
   try {
-    snap = await getDocs(buildQuery(cursor));
+    const clauses = cursor ? [startAfter(cursor), limit(ADMIN_PAGE_SIZE)] : [limit(ADMIN_PAGE_SIZE)];
+    snap = await getDocs(query(collection(db, colName), ...clauses));
   } catch (error) {
-    // Documents predating createdAt are invisible to an orderBy query, and a missing composite
-    // index throws. Fall back to an unordered page rather than showing a false empty state.
-    console.warn(`[RVU] Ordered ${colName} query failed, falling back to unordered`, error);
-    try {
-      const clauses = cursor ? [startAfter(cursor), limit(ADMIN_PAGE_SIZE)] : [limit(ADMIN_PAGE_SIZE)];
-      snap = await getDocs(query(collection(db, colName), ...clauses));
-    } catch (fallbackError) {
-      return { docs: [], lastDocId: null, error: handleFirebaseError(fallbackError) };
-    }
+    return { docs: [], lastDocId: null, error: handleFirebaseError(error, `Could not load ${colName}`) };
   }
 
   return {
-    docs: rows(snap),
+    // Cursor stays on document id (the query's real order); only display order is by date.
+    docs: sortByCreatedAtDesc(rows(snap)),
     lastDocId: snap.docs.length > 0 ? snap.docs[snap.docs.length - 1].id : null,
     hasMore: snap.docs.length === ADMIN_PAGE_SIZE,
   };
@@ -2010,9 +1971,6 @@ window.RVUFirebase = {
   updateSiteSetting,
   updateUserRole,
   removeClubCoreRole,
-  getEventRSVPs,
-  setEventRsvp,
-  removeEventRsvp,
   signOut: () => {
     _cachedSuperAdminResult = null;
     return signOut(auth);

@@ -1025,42 +1025,6 @@ export async function handleAction(action, dataset) {
     renderAtTop();
     return;
   }
-  if (action === "rsvp-event" || action === "cancel-rsvp") {
-    if (state.isDemoMode) {
-      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Sign in to RSVP — demo mode does not save.", type: "info" } }));
-      return;
-    }
-    if (!window.RVUFirebase || !state.authUser) {
-      state.loginOpen = true;
-      renderAtTop();
-      return;
-    }
-    const eventId = dataset.docid;
-    if (!eventId) return;
-    const event = events.find((e) => e.id === eventId) || { id: eventId, title: dataset.title || "" };
-    const previous = state.rsvps.slice();
-    try {
-      if (action === "cancel-rsvp") {
-        state.rsvps = state.rsvps.filter((r) => (r.eventId || r.id) !== eventId);
-        renderAtTop();
-        await window.RVUFirebase.removeEventRsvp(eventId);
-        window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "RSVP withdrawn.", type: "info" } }));
-      } else {
-        const status = dataset.status === "interested" ? "interested" : "going";
-        const saved = { id: eventId, eventId, title: event.title || "", status };
-        state.rsvps = [saved, ...state.rsvps.filter((r) => (r.eventId || r.id) !== eventId)];
-        renderAtTop();
-        await window.RVUFirebase.setEventRsvp(event, status);
-        window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: status === "going" ? "You're going." : "Marked as interested.", type: "success" } }));
-      }
-    } catch (e) {
-      state.rsvps = previous; // roll the optimistic update back
-      renderAtTop();
-      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: e.message || "Could not update your RSVP.", type: "error" } }));
-    }
-    return;
-  }
-
   // Detail views go through navigate() so they get a URL and a history entry. Setting the
   // selected id and re-rendering directly meant detail pages were not shareable, and Back
   // skipped the list entirely — it went to whatever route was visited before it.

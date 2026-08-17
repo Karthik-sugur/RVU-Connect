@@ -717,9 +717,8 @@ export function renderHome() {
           <div class="section-title"><h2>My Campus</h2><span>Saved and applied</span></div>
           <div class="updates">
             ${state.followedClubs.slice(0, 2).map((item) => `<article class="update-item"><h3>${escapeHtml(item.clubName || "Followed club")}</h3><p>Club followed for personalized updates.</p></article>`).join("")}
-            ${state.rsvps.slice(0, 2).map((item) => `<article class="update-item"><h3>${escapeHtml(item.title || "RSVP")}</h3><p>${escapeHtml(item.status || "going")} RSVP stored.</p></article>`).join("")}
-            ${state.myApplications.slice(0, 2).map((item) => `<article class="update-item"><h3>${escapeHtml(item.title || "Project application")}</h3><p>Status: ${escapeHtml(item.status || "pending")}</p></article>`).join("")}
-            ${!state.followedClubs.length && !state.rsvps.length && !state.myApplications.length ? renderEmptyState("No personal activity yet", "Follow clubs, RSVP to events, save content, or apply to projects.") : ""}
+            ${state.savedItems.slice(0, 2).map((item) => `<article class="update-item"><h3>${escapeHtml(item.title || "Saved item")}</h3><p>Saved for later.</p></article>`).join("")}
+            ${!state.followedClubs.length && !state.savedItems.length ? renderEmptyState("No personal activity yet", "Follow clubs and save events, projects or updates to see them here.") : ""}
           </div>
         </section>
       </aside>
@@ -768,34 +767,6 @@ export function sameHost(a, b) {
   }
   // Legacy events with neither id — fall back to the display name, but require it to exist.
   return Boolean(b.host) && a.host === b.host;
-}
-
-/** The signed-in user's RSVP for an event, or null. */
-export function rsvpFor(eventId) {
-  if (!eventId) return null;
-  return (state.rsvps || []).find((r) => (r.eventId || r.id) === eventId) || null;
-}
-
-/**
- * RSVP buttons for an event.
- * RSVP was previously display-only: three surfaces showed RSVP data but nothing in the app
- * ever wrote one. These are the controls that make the feature real.
- */
-export function renderRsvpControls(event) {
-  const rsvp = rsvpFor(event.id);
-  const going = rsvp?.status === "going";
-  const interested = rsvp?.status === "interested";
-  const base = "padding:12px 20px;min-height:44px;font-size:12px;font-weight:800;font-family:inherit;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;";
-  return `
-    <button style="${base}background:${going ? "#2a7a4a" : "#D7AC54"};color:${going ? "#fff" : "#1a1a1a"};border:none;"
-      data-action="${going ? "cancel-rsvp" : "rsvp-event"}" data-status="going"
-      data-docid="${event.id}" data-title="${escapeHtml(event.title || "")}"
-      aria-pressed="${going ? "true" : "false"}">${going ? "✓ Going" : "RSVP · Going"}</button>
-    <button style="${base}background:none;border:1.5px solid ${interested ? "#D7AC54" : "#c8b89a"};color:${interested ? "#8a6a2a" : "#5a4a3a"};"
-      data-action="${interested ? "cancel-rsvp" : "rsvp-event"}" data-status="interested"
-      data-docid="${event.id}" data-title="${escapeHtml(event.title || "")}"
-      aria-pressed="${interested ? "true" : "false"}">${interested ? "✓ Interested" : "Interested"}</button>
-  `;
 }
 
 export function renderEventDetail() {
@@ -862,8 +833,7 @@ export function renderEventDetail() {
 
         ${!isPast && !isCancelled ? `
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:24px;">
-            ${renderRsvpControls(event)}
-            ${event.link ? `<a href="${safeUrl(event.link)}" target="_blank" rel="noopener" style="background:none;border:1.5px solid #D7AC54;color:#8a6a2a;padding:12px 24px;font-size:12px;font-weight:800;font-family:inherit;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:6px;">Join →</a>` : ""}
+            ${safeUrl(event.link) ? `<a href="${safeUrl(event.link)}" target="_blank" rel="noopener" style="background:#D7AC54;color:#1a1a1a;border:none;padding:12px 24px;min-height:44px;font-size:12px;font-weight:800;font-family:inherit;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:6px;">Join →</a>` : ""}
             <button style="background:none;border:1.5px solid #c8b89a;color:#5a4a3a;padding:12px 18px;font-size:12px;font-weight:700;font-family:inherit;letter-spacing:0.05em;text-transform:uppercase;cursor:pointer;" data-action="${isItemSaved(event.id, "event") ? "unsave-item" : "save-item"}" data-docid="${event.id}" data-kind="event" data-title="${escapeHtml(event.title)}">${isItemSaved(event.id, "event") ? "Saved" : "Save"}</button>
             ${canManageEvent(event) ? `
               <button style="background:none;border:1.5px solid #c8b89a;color:#5a4a3a;padding:12px 18px;font-size:12px;font-weight:700;font-family:inherit;letter-spacing:0.05em;text-transform:uppercase;cursor:pointer;" data-action="open-edit-event" data-docid="${event.id}">Edit</button>
@@ -1386,7 +1356,7 @@ export function renderAnnouncementDetail() {
 
         <div style="height:1px;background:#d8cfc4;margin-bottom:16px;"></div>
 
-        ${item.link ? `
+        ${safeUrl(item.link) ? `
           <div style="margin-bottom:24px;">
             <a href="${safeUrl(item.link)}" target="_blank" rel="noopener" style="background:#D7AC54;color:#1a1a1a;border:none;padding:12px 24px;font-size:12px;font-weight:800;font-family:inherit;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:6px;">Join / Learn More →</a>
           </div>` : ""}
@@ -1467,15 +1437,6 @@ export function renderProfile() {
       </div>`).join("")
     : `<p style="font-size:13px;color:#756552;margin:0;padding:8px 0;">No clubs followed yet.</p>`;
 
-  const rsvpContent = state.rsvps.length
-    ? state.rsvps.map(r => listRow(
-      `<div>
-          <p style="font-size:14px;font-weight:600;color:#1a1a1a;margin:0 0 3px;font-family:inherit;">${escapeHtml(r.title || "Event")}</p>
-        </div>`,
-      badge(r.status || "going", r.status === "interested" ? "#D7AC54" : "#2a7a4a")
-    )).join("")
-    : `<p style="font-size:13px;color:#756552;margin:0;padding:8px 0;">No RSVPs yet.</p>`;
-
 
   const clubAppsContent = state.clubApplications.length
     ? state.clubApplications.map(a => {
@@ -1508,12 +1469,7 @@ export function renderProfile() {
     : `<p style="font-size:13px;color:#756552;margin:0;padding:8px 0;">Nothing saved yet.</p>`;
 
   const recentActivity = [
-    ...state.rsvps.slice(0, 2).map(r => ({
-      type: "rsvp",
-      text: `You RSVPed to ${r.title || "an event"}`,
-      status: r.status || "going",
-    })),
-    ...state.followedClubs.slice(0, 1).map(c => ({
+    ...state.followedClubs.slice(0, 2).map(c => ({
       type: "follow",
       text: `You follow ${c.clubName || "a club"}`,
       status: "following",
@@ -1793,8 +1749,11 @@ export function renderEventCard(event) {
     hostDisplay = schoolName;
   }
 
-  const joinButton = event.link
-    ? `<button style="background:#D7AC54;color:#1a1a1a;border:none;padding:9px 16px;min-height:40px;font-size:12px;font-weight:700;font-family:inherit;letter-spacing:0.05em;cursor:pointer;text-transform:uppercase;" data-action="open-external-link" data-url="${escapeHtml(event.link)}">Join</button>`
+  // safeUrl() returns "" for anything that is not http(s), so a javascript: link in the
+  // stored event never produces a button.
+  const joinUrl = safeUrl(event.link);
+  const joinButton = joinUrl
+    ? `<button style="background:#D7AC54;color:#1a1a1a;border:none;padding:9px 16px;min-height:40px;font-size:12px;font-weight:700;font-family:inherit;letter-spacing:0.05em;cursor:pointer;text-transform:uppercase;" data-action="open-external-link" data-url="${joinUrl}">Join</button>`
     : "";
 
   const actionButtons = isPast
@@ -1802,9 +1761,6 @@ export function renderEventCard(event) {
       <button style="background:none;border:none;color:#6a5a4a;padding:0;font-size:11px;font-family:inherit;cursor:pointer;text-transform:uppercase;letter-spacing:0.05em;" data-action="flag-content" data-docid="${event.id}" data-kind="event" data-title="${escapeHtml(event.title)}">Report</button>
     </div>`
     : `<div style="display:flex;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap;">
-      ${rsvpFor(event.id)
-        ? `<button style="background:#2a7a4a;color:#fff;border:none;padding:9px 16px;min-height:40px;font-size:12px;font-weight:700;font-family:inherit;letter-spacing:0.05em;cursor:pointer;text-transform:uppercase;" data-action="cancel-rsvp" data-docid="${event.id}" data-title="${escapeHtml(event.title || "")}">✓ ${escapeHtml(rsvpFor(event.id).status === "interested" ? "Interested" : "Going")}</button>`
-        : `<button style="background:#D7AC54;color:#1a1a1a;border:none;padding:9px 16px;min-height:40px;font-size:12px;font-weight:700;font-family:inherit;letter-spacing:0.05em;cursor:pointer;text-transform:uppercase;" data-action="rsvp-event" data-status="going" data-docid="${event.id}" data-title="${escapeHtml(event.title || "")}">RSVP</button>`}
       ${joinButton}
       <button style="background:none;border:1.5px solid #c8b89a;color:#5a4a3a;padding:9px 14px;min-height:40px;font-size:12px;font-weight:600;font-family:inherit;letter-spacing:0.05em;cursor:pointer;text-transform:uppercase;" data-action="${saved ? "unsave-item" : "save-item"}" data-docid="${event.id}" data-kind="event" data-title="${escapeHtml(event.title)}">${saved ? "Saved" : "Save"}</button>
       <button style="background:none;border:1.5px solid #c8b89a;color:#5a4a3a;padding:9px 14px;min-height:40px;font-size:12px;font-weight:600;font-family:inherit;letter-spacing:0.05em;cursor:pointer;text-transform:uppercase;" data-action="calendar-event" data-docid="${event.id}">Calendar</button>
@@ -1943,6 +1899,7 @@ export function renderAnnouncement(item) {
       <h3>${escapeHtml(item.title)}</h3>
       <p>${escapeHtml(item.description || "")}</p>
       <div style="display:flex;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap;">
+        ${safeUrl(item.link) ? `<button style="background:#D7AC54;color:#1a1a1a;border:none;padding:9px 16px;min-height:40px;font-size:12px;font-weight:700;font-family:inherit;letter-spacing:0.05em;cursor:pointer;text-transform:uppercase;" data-action="open-external-link" data-url="${safeUrl(item.link)}">Join</button>` : ""}
         <button style="background:none;border:1.5px solid #c8b89a;color:#5a4a3a;padding:9px 14px;min-height:40px;font-size:12px;font-weight:600;font-family:inherit;letter-spacing:0.05em;cursor:pointer;text-transform:uppercase;" data-action="${saved ? "unsave-item" : "save-item"}" data-docid="${item.id}" data-kind="announcement" data-title="${escapeHtml(item.title || "")}">${saved ? "Saved" : "Save"}</button>
         <button style="background:none;border:1.5px solid #d8cfc4;color:#6a5a4a;padding:9px 12px;min-height:40px;font-size:11px;font-family:inherit;cursor:pointer;text-transform:uppercase;letter-spacing:0.05em;" data-action="flag-content" data-docid="${item.id}" data-kind="announcement" data-title="${escapeHtml(item.title || "")}">Report</button>
       </div>
