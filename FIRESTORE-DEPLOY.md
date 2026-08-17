@@ -4,49 +4,61 @@ Project: **`rvuconnect-26c39`** (from `.firebaserc`)
 
 ---
 
-## ⛔ Read this before you deploy
+## Super admin account
 
-**The new rules restrict all access to `@rvu.edu.in` accounts. If your Super Admin signs in with
-a non-RVU address, deploying will lock them out of the admin console immediately.**
+The Super Admin is **`kushalsbtech24@rvu.edu.in`**.
 
-`isSuperAdmin()` calls `isRvuEmail()` first, so a `@gmail.com` super admin fails every rule —
-including reading their own `users` document. The console will render its "access denied" screen
-and no admin action will work.
+That resolves the domain question: the new rules restrict all access to `@rvu.edu.in`, and
+`isSuperAdmin()` calls `isRvuEmail()` first, so an admin on any other domain would have been
+locked out of the console the moment the rules landed. An RVU address is on the right side of that
+rule, so the deploy is safe to run.
 
-This is worth 30 seconds of checking because the signals point at it:
+**Bootstrap it once, before deploying** (only needed if this account is not already an admin):
 
-- The Firebase CLI on this machine is logged in as `kushalsathyanarayan@gmail.com`.
-- Commit `0f9b0dd` deliberately removed the domain restriction ("allow all email domains"),
-  which is what a team using non-RVU accounts for development would do.
+1. Sign in to the app once with `kushalsbtech24@rvu.edu.in` so Firebase Auth creates the account
+   and `ensureUserProfile` writes its `users/{uid}` document.
+2. Copy the UID from Firebase Console → Authentication → Users.
+3. Create `superAdmins/{uid}` with `{ uid, email: "kushalsbtech24@rvu.edu.in" }`, and set
+   `users/{uid}.role = "superAdmin"`.
 
-**Check first** — Firebase Console → Authentication → Users, and Firestore → `superAdmins`.
-Confirm every super admin's email ends in `@rvu.edu.in`.
+Either of those two is enough on its own — `hasSuperAdminGrant()` checks the `superAdmins`
+document first and falls back to `users/{uid}.role`. Writing both keeps the client and the rules
+in agreement.
 
-If one does not, pick one:
-
-| Option | What to do |
-|---|---|
-| Give admins RVU accounts *(cleanest)* | Sign in once with the `@rvu.edu.in` account, then add its UID to `superAdmins/{uid}` and set `users/{uid}.role = "superAdmin"`. Deploy after that. |
-| Allow specific exceptions | Change `isRvuEmail()` in `firestore.rules` to also accept an allowlist, e.g. `\|\| request.auth.token.email.lower() in ['you@gmail.com']`. Update `js/services.js`, `js/auth.js` and `admin.js` to match. |
-| Keep all domains open | Revert `isRvuEmail()` to `request.auth.token.email is string`. **This re-opens the hole where any Google account can read the entire campus dataset** — the audit's finding stands. |
-
-Rules deploys are reversible (redeploy the previous file), but a mid-day lockout is disruptive.
-
----
+**Retire any other admin account.** If a non-RVU address is still present in `superAdmins` or has
+`users/{uid}.role == "superAdmin"`, delete that `superAdmins` document and set its role back to
+`student`. Leaving it costs nothing functionally once the rules are deployed — the domain check
+already denies it — but it is a stale grant, and stale grants are what the audit kept finding.
 
 ## The CLI needs re-authentication
 
-The stored credentials on this machine are expired, so I could not deploy for you:
+The credentials stored on this machine are expired, so I could not deploy for you:
 
 ```
 Error: HTTP Error: 401, Request had invalid authentication credentials.
 ```
 
-Re-auth is an interactive browser flow, so it has to be you:
+They also belonged to a different Google account. Clear it and sign in as the RVU account — this
+is an interactive browser flow, so it has to be you:
 
 ```bash
-npx firebase login --reauth
+npx firebase logout
 ```
+
+```bash
+npx firebase login
+```
+
+Pick `kushalsbtech24@rvu.edu.in` in the browser prompt, then confirm:
+
+```bash
+npx firebase login:list
+```
+
+The account you deploy with needs Editor or Owner on the `rvuconnect-26c39` project. Deploying
+rules is a project-admin action and is unrelated to the in-app Super Admin role — but if this RVU
+account is not yet a project member, add it in Firebase Console → Project settings → Users and
+permissions.
 
 ---
 
