@@ -169,10 +169,22 @@ function defaultReview() {
   return { title: "", collection: "events", targetId: "", note: "" };
 }
 
+/** Escape for text AND attribute contexts. Keep self-contained — see js/utils.js. */
 function escapeHtml(value) {
-  const div = document.createElement("div");
-  div.textContent = value == null ? "" : String(value);
-  return div.innerHTML;
+  if (value == null) return "";
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/** Allow only http(s) URLs through into href/src. */
+function safeUrl(value) {
+  const raw = String(value == null ? "" : value).trim();
+  if (!/^https?:\/\//i.test(raw)) return "";
+  return escapeHtml(raw);
 }
 
 function isRvuEmail(email) {

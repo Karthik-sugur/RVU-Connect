@@ -487,40 +487,13 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
 
   const announcementRows = rows(announcementsSnap).filter((item) => !isAnnouncementExpired(item));
 
-  // Mark / purge events past their date+time (registration/event window set at create).
-  const liveEventRows = [];
-  for (const event of rows(eventsSnap)) {
-    if (!isEventExpired(event)) {
-      liveEventRows.push({ ...event, past: false });
-      continue;
-    }
-    const canPurge = Boolean(
-      auth.currentUser
-      && (superAdmin || event.createdBy === auth.currentUser.uid)
-    );
-    if (canPurge) {
-      // Silent purge — avoid permission-trace noise when rules reject a delete.
-      await deleteDoc(doc(db, "events", event.id)).catch(() => {});
-    }
-  }
+  // FILTER ONLY — never delete here. Deleting on read destroys campus history as a side
+  // effect of loading the feed. Purging belongs in an explicit admin action.
+  const liveEventRows = rows(eventsSnap)
+    .filter((event) => !isEventExpired(event))
+    .map((event) => ({ ...event, past: false }));
 
-  // Hide projects whose expiry date has passed (end of that calendar day).
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const liveProjectRows = [];
-  for (const project of rows(projectsSnap)) {
-    const expiry = String(project.expiry || "").trim();
-    if (/^\d{4}-\d{2}-\d{2}$/.test(expiry)) {
-      const expiryDate = new Date(`${expiry}T23:59:59`);
-      if (!Number.isNaN(expiryDate.getTime()) && expiryDate.getTime() < Date.now()) {
-        if (auth.currentUser && (superAdmin || project.createdBy === auth.currentUser.uid || project.ownerId === auth.currentUser.uid)) {
-          await deleteDoc(doc(db, "projects", project.id)).catch(() => {});
-        }
-        continue;
-      }
-    }
-    liveProjectRows.push(project);
-  }
+  const liveProjectRows = rows(projectsSnap).filter((project) => !isProjectExpired(project));
 
   const data = {
     clubs: clubsRows,
@@ -780,6 +753,13 @@ function isEventExpired(event) {
   if (!/^\d{1,2}:\d{2}:\d{2}$/.test(timeStr)) timeStr = "23:59:00";
   const dt = new Date(`${dateStr}T${timeStr}`);
   return !Number.isNaN(dt.getTime()) && dt.getTime() < Date.now();
+}
+
+function isProjectExpired(project) {
+  const expiry = String(project?.expiry || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(expiry)) return false;
+  const expiryDate = new Date(`${expiry}T23:59:59`);
+  return !Number.isNaN(expiryDate.getTime()) && expiryDate.getTime() < Date.now();
 }
 
 function isAnnouncementExpired(item) {
@@ -1170,9 +1150,35 @@ async function listClubCoreMembers(clubId) {
   return rows(snap).filter((m) => (m.status || "approved") === "approved");
 }
 
+/** Remove another member from a club's core team. Demotes their grant too — see leaveClubCore. */
 async function removeClubCoreRole(clubId, email) {
   const normalizedEmail = email.trim().toLowerCase();
-  await tracedDeleteDoc(doc(db, "clubs", clubId, "coreMembers", normalizedEmail));
+  const memberRef = doc(db, "clubs", clubId, "coreMembers", normalizedEmail);
+  let memberUid = "";
+  try {
+    const snap = await getDoc(memberRef);
+    memberUid = snap.exists() ? (snap.data()?.uid || "") : "";
+  } catch (_) { /* fall through to the delete */ }
+
+  if (memberUid) {
+    await demoteClubApplication(clubId, memberUid, "revoked");
+  } else {
+    try {
+      const byEmail = await getDocs(query(
+        collection(db, "clubApplications"),
+        where("clubId", "==", clubId),
+        where("email", "==", normalizedEmail),
+        where("status", "==", "approved"),
+        limit(10)
+      ));
+      await Promise.all(byEmail.docs.map((row) =>
+        updateDoc(row.ref, { status: "revoked", revokedAt: serverTimestamp(), updatedAt: serverTimestamp() }).catch(() => {})
+      ));
+    } catch (error) {
+      console.warn("[RVU] Could not demote club application by email", normalizedEmail, error);
+    }
+  }
+  await tracedDeleteDoc(memberRef);
 }
 
 async function updateClubLeadership(clubId, data) {
@@ -1292,12 +1298,46 @@ async function unfollowClub(clubId) {
   await tracedDeleteDoc(ref);
 }
 
+/**
+ * Revoke the caller's own club-core membership.
+ * Must demote the approved clubApplication too — it is the standing grant the self-heal paths
+ * read from, so deleting only the roster doc lets the membership come straight back.
+ */
 async function leaveClubCore(clubId) {
   const user = auth.currentUser;
   if (!user?.email) throw new Error("Sign in first.");
   if (!clubId) throw new Error("Club id required.");
   const email = user.email.trim().toLowerCase();
+  await demoteClubApplication(clubId, user.uid, "withdrawn");
   await tracedDeleteDoc(doc(db, "clubs", clubId, "coreMembers", email));
+}
+
+/** Mark the standing club-core grant not-approved so the self-heal paths ignore it. */
+async function demoteClubApplication(clubId, uid, status) {
+  if (!clubId || !uid) return;
+  const ref = doc(db, "clubApplications", `${clubId}_${uid}`);
+  try {
+    const snap = await getDoc(ref);
+    if (snap.exists()) {
+      await updateDoc(ref, { status, revokedAt: serverTimestamp(), updatedAt: serverTimestamp() });
+    }
+  } catch (error) {
+    console.warn("[RVU] Could not demote club application", `${clubId}_${uid}`, error);
+  }
+  try {
+    const legacy = await getDocs(query(
+      collection(db, "clubApplications"),
+      where("uid", "==", uid),
+      where("clubId", "==", clubId),
+      where("status", "==", "approved"),
+      limit(10)
+    ));
+    await Promise.all(legacy.docs.map((row) =>
+      updateDoc(row.ref, { status, revokedAt: serverTimestamp(), updatedAt: serverTimestamp() }).catch(() => {})
+    ));
+  } catch (_) {
+    /* the deterministic doc above is the one the heal paths read */
+  }
 }
 
 async function flagContent(payload) {
@@ -1651,6 +1691,7 @@ window.RVUFirebase = {
   approveClubApplication,
   rejectClubApplication,
   isEventExpired,
+  isProjectExpired,
   isAnnouncementExpired,
   unfollowClub,
   updateAnnouncementStatus,
