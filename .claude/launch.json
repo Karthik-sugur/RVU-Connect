@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "rvu-connect",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["/Users/kushalsathyanarayan/Desktop/RVU_connect/.claude/static-server.js"],
+      "port": 8765
+    }
+  ]
+}
