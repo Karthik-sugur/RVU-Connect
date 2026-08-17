@@ -104,17 +104,78 @@ export function renderRestrictedAdmin() {
 }
 
 export function renderPendingAdminAccess() {
+  /*
+   * Show the real status of each request instead of a generic "pending" screen.
+   * A club that was deleted, or a request that was rejected, previously left the applicant
+   * on "Waiting for approval" indefinitely with nothing explaining why and no way to act.
+   */
+  const myUid = state.authUser?.uid;
+  const requests = (state.hostRequests || []).filter((r) => !myUid || r.uid === myUid);
+  const applications = state.clubApplications || [];
+
+  const clubName = (clubId) => {
+    const club = clubs.find((c) => (c.id || c.slug) === clubId);
+    return club ? club.name : null;
+  };
+
+  const rows = [
+    ...applications.map((app) => {
+      const name = clubName(app.clubId);
+      return {
+        label: name || `Club (${app.clubId || "unknown"})`,
+        status: app.status || "pending",
+        // No club document means it was deleted or was never approved.
+        note: name ? "Reviewed by the club's core team" : "This club no longer exists — apply to another club.",
+        orphaned: !name,
+      };
+    }),
+    ...requests.map((r) => ({
+      label: r.type === "schoolRepresentative"
+        ? `School rep · ${r.schoolId || state.host.school || "your school"}`
+        : r.type === "newClub"
+          ? `New club · ${r.clubName || r.clubId || ""}`
+          : `Club core · ${clubName(r.clubId) || r.clubId || ""}`,
+      status: r.status || "pending",
+      note: "Reviewed by a Super Admin",
+      orphaned: false,
+    })),
+  ];
+
+  const statusColor = { pending: "#7d6a12", approved: "#10695a", rejected: "#b3261e", withdrawn: "#756552", revoked: "#b3261e" };
+
   return `
     <section class="page-head admin-head">
       ${sectionLabel("06", "Pending approval")}
       <h1>Waiting for approval</h1>
-      <p>Your host request is still pending. You can explore campus content, but posting stays locked until a super admin (or club core for membership apps) approves you.</p>
+      <p>You can explore campus content, but posting stays locked until your request is approved. Club membership applications are reviewed by that club's core team; school-rep and new-club requests are reviewed by a Super Admin.</p>
     </section>
     <section class="admin-workspace">
       <div class="admin-summary">
         <span><strong>${escapeHtml(state.host.type || "Host")}</strong> request</span>
-        <span><strong>${escapeHtml(state.host.approver || "Super Admin")}</strong> approver route</span>
+        <span><strong>${rows.length}</strong> submitted</span>
       </div>
+      ${rows.length ? `
+        <div class="admin-board">
+          <article class="admin-card wide">
+            <span class="section-num">Status</span>
+            <h2>Your requests</h2>
+            ${rows.map((row) => `
+              <div class="admin-row">
+                <div>
+                  <strong>${escapeHtml(row.label)}</strong>
+                  <span>${escapeHtml(row.note)}</span>
+                </div>
+                <div class="admin-row-actions">
+                  <span style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;color:${statusColor[row.status] || "#756552"};">${escapeHtml(row.status)}</span>
+                  ${row.status === "rejected" || row.orphaned
+                    ? `<button data-action="open-club-apply-modal">Apply elsewhere</button>`
+                    : ""}
+                </div>
+              </div>
+            `).join("")}
+          </article>
+        </div>
+      ` : renderEmptyState("No requests found", "If you just applied, give it a moment and refresh. Otherwise apply from your Profile page.")}
     </section>
   `;
 }
@@ -133,7 +194,7 @@ export function renderSchoolAdmin() {
         <article class="admin-card wide">
           <span class="section-num">Post</span>
           <h2>School representative tools</h2>
-          <p style="font-size:13px;color:#8a7a6a;margin:0 0 16px;">You can post events and announcements for any school using the school dropdown in Create. New school-rep applications are approved only by Super Admin (or by setting the request status to approved in Firestore).</p>
+          <p style="font-size:13px;color:#756552;margin:0 0 16px;">You can post events and announcements for any school using the school dropdown in Create. New school-rep applications are approved only by Super Admin (or by setting the request status to approved in Firestore).</p>
           <div class="project-actions" style="margin-bottom:18px;display:flex;gap:10px;flex-wrap:wrap;">
             <button class="btn gold" data-action="create-event" data-mode="school">Create school event</button>
             <button class="btn secondary" data-action="create-announcement" data-mode="school">Create school notice</button>
@@ -185,14 +246,14 @@ export function renderClubAdmin() {
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:12px;flex-wrap:wrap;">
             <div>
               <h2 style="margin:0;">Membership Applications</h2>
-              <p style="margin:8px 0 0;font-size:13px;color:#8a7a6a;">Review students applying for club core on ${escapeHtml(clubNames || "your club")}. Club founders and every approved core member can accept or reject applicants.</p>
+              <p style="margin:8px 0 0;font-size:13px;color:#756552;">Review students applying for club core on ${escapeHtml(clubNames || "your club")}. Club founders and every approved core member can accept or reject applicants.</p>
             </div>
             <button style="background:none;border:1.5px solid #c8b89a;padding:4px 10px;font-size:11px;font-weight:700;color:#5a4a3a;cursor:pointer;text-transform:uppercase;" data-action="load-club-applicants">Refresh</button>
           </div>
           ${state._clubApplicantsLoading ? `
-            <div style="text-align:center;padding:20px;color:#8a7a6a;font-size:13px;">Loading applications…</div>
+            <div style="text-align:center;padding:20px;color:#756552;font-size:13px;">Loading applications…</div>
           ` : !state._clubApplicantsLoaded ? `
-            <div style="text-align:center;padding:20px;color:#8a7a6a;font-size:13px;">Loading applications…</div>
+            <div style="text-align:center;padding:20px;color:#756552;font-size:13px;">Loading applications…</div>
           ` : applicants.length === 0 ? `
             ${renderEmptyState("No pending applications", "When students apply to your club, they will appear here for you to approve or reject.")}
           ` : applicants.map(app => {
@@ -248,7 +309,7 @@ export function renderSuperAdmin() {
       <article class="admin-card wide">
         <span class="section-num">Pending</span>
         <h2>Host &amp; club requests</h2>
-        <p style="font-size:13px;color:#8a7a6a;margin:0 0 16px;">School-rep and new-club requests must be approved here (or set <code>status</code> to <code>approved</code> in Firestore for school-rep only). New clubs still need the Approve button so the club document is created. Club membership apps for clubs with no core team also appear below.</p>
+        <p style="font-size:13px;color:#756552;margin:0 0 16px;">School-rep and new-club requests must be approved here (or set <code>status</code> to <code>approved</code> in Firestore for school-rep only). New clubs still need the Approve button so the club document is created. Club membership apps for clubs with no core team also appear below.</p>
         <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
           <button style="background:none;border:1.5px solid #c8b89a;padding:4px 10px;font-size:11px;font-weight:700;color:#5a4a3a;cursor:pointer;text-transform:uppercase;" data-action="repair-school-rep-grants" title="One-time migrate old school-rep accounts. Not needed for new approvals.">Migrate old school-rep grants</button>
           <button style="background:none;border:1.5px solid #c8b89a;padding:4px 10px;font-size:11px;font-weight:700;color:#5a4a3a;cursor:pointer;text-transform:uppercase;" data-action="load-all-club-applicants">Refresh club apps</button>

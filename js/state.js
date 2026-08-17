@@ -102,6 +102,9 @@ export const state = {
     clubCategory: "All",
     clubSchool: "All",
     announcementType: "All",
+    // Must be declared here: the change handler only assigns filters that already exist on
+    // this object, so an undeclared filter silently never applies.
+    announcementTag: "All",
     projectTag: "All",
   },
   allUsers: [],
@@ -109,10 +112,16 @@ export const state = {
   allAnnouncements: [],
   allClubs: [],
   allSchools: [],
+  contentReviews: [],
   savedItems: [],
   followedClubs: [],
   rsvps: [],
+  // Read unguarded by the Home page. Without a default here, any failure before the first
+  // sync assigned it threw and replaced the whole app with a blank screen.
+  myApplications: [],
   siteSettings: [],
+  loadErrors: [],
+  _adminTabsLoaded: {},
   // Club Core applications (student's own)
   clubApplications: [],
   // Pending applicants for the active club (club-core view)
@@ -120,11 +129,14 @@ export const state = {
   _clubApplicantsLoaded: false,
   // Modal flags
   _clubApplyModalOpen: false,
+  _clubApplicantsLoading: false,
   editClubOpen: false,
   editClubId: null,
   clubCoreMembers: [],
   _clubCoreMembersLoading: false,
-  editClubId: null,
+  _loadedClubCoreFor: null,
+  _hasClubCore: false,
+  _hasSchoolRep: false,
 };
 
 export const app = document.querySelector("#app");

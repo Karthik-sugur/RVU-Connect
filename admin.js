@@ -63,7 +63,6 @@ async function promptUser(message, defaultValue = "") {
   });
 }
 
-import { applyDemoCampusData } from "./sample-data.js";
 
 const schools = [
   "School of Computer Science and Engineering",
@@ -169,10 +168,27 @@ function defaultReview() {
   return { title: "", collection: "events", targetId: "", note: "" };
 }
 
+/**
+ * Escape for both text and attribute contexts. Quotes MUST be escaped — this value goes
+ * into double-quoted attributes throughout the console, and student-supplied strings
+ * (profile names, club names) reach them. Kept self-contained for the same reason as the
+ * copy in js/utils.js. See that file for the full explanation.
+ */
 function escapeHtml(value) {
-  const div = document.createElement("div");
-  div.textContent = value == null ? "" : String(value);
-  return div.innerHTML;
+  if (value == null) return "";
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/** Allow only http(s) URLs through into href/src. */
+function safeUrl(value) {
+  const raw = String(value == null ? "" : value).trim();
+  if (!/^https?:\/\//i.test(raw)) return "";
+  return escapeHtml(raw);
 }
 
 function isRvuEmail(email) {
@@ -217,36 +233,48 @@ function downloadCSV(filename, rows) {
 }
 
 async function loadAdminData() {
+  /*
+   * This console shows LIVE PRODUCTION DATA ONLY.
+   *
+   * It used to pipe everything through applyDemoCampusData(), whose preferLive() helper
+   * substitutes sample-data.js fixtures whenever a live collection comes back empty. On a
+   * fresh database that meant the super admin saw fabricated users, clubs, events, flags and
+   * reviews presented as real records — and every approve/delete/grant action fired against
+   * invented ids like "demo-club-ai-forge". Never merge fixtures in here.
+   */
   const campusData = await window.RVUFirebase.loadCampusData({ superAdmin: true });
 
-  let liveHostRequests = null;
+  let liveHostRequests = [];
   try {
     const reqRes = await window.RVUFirebase.loadAdminTab("requests");
-    if (reqRes && Array.isArray(reqRes.docs)) {
-      liveHostRequests = reqRes.docs;
-    }
+    if (reqRes && Array.isArray(reqRes.docs)) liveHostRequests = reqRes.docs;
   } catch (err) {
     console.warn("Could not fetch live host requests:", err);
   }
 
-  const data = applyDemoCampusData({
-    ...campusData,
-    hostRequests: liveHostRequests !== null ? liveHostRequests : campusData.hostRequests,
-  });
+  let liveFlags = campusData.moderationFlags || [];
+  try {
+    const flagRes = await window.RVUFirebase.loadAdminTab("moderation");
+    if (flagRes && Array.isArray(flagRes.docs) && flagRes.docs.length) liveFlags = flagRes.docs;
+  } catch (err) {
+    console.warn("Could not fetch moderation flags:", err);
+  }
 
   state.data = {
-    hostRequests: liveHostRequests !== null ? liveHostRequests : (data.hostRequests || []),
-    moderationFlags: data.moderationFlags || [],
-    allUsers: data.allUsers || [],
-    allEvents: data.allEvents || [],
-    allAnnouncements: data.allAnnouncements || [],
-    allClubs: data.allClubs || [],
-    allSchools: data.allSchools || [],
-    contentReviews: data.contentReviews || [],
-    siteSettings: data.siteSettings || [],
-    projects: data.projects || [],
+    hostRequests: liveHostRequests,
+    moderationFlags: liveFlags,
+    allUsers: campusData.allUsers || [],
+    allEvents: campusData.allEvents || [],
+    allAnnouncements: campusData.allAnnouncements || [],
+    allClubs: campusData.allClubs || [],
+    allSchools: campusData.allSchools || [],
+    contentReviews: campusData.contentReviews || [],
+    siteSettings: campusData.siteSettings || [],
+    projects: campusData.projects || [],
   };
-  state.loadedAdminTabs = { requests: true };
+  state.loadErrors = campusData.loadErrors || [];
+  state.loadedAdminTabs = { requests: true, moderation: true };
+  state.adminCursors = {};
   const platform = state.data.siteSettings.find((item) => item.id === "platform");
   if (platform) {
     state.forms.settings = {
@@ -671,8 +699,12 @@ function renderAnnouncements() {
 }
 
 function announcementRow(item) {
+  // Both directions must exist. With only Unpublish, moving an announcement to draft was
+  // irreversible from the console and the only way back was deleting it.
   return row(item.title, `${item.source || "RVU"} · ${item.tag || "Update"} · ${item.status || "unknown"}`, `
-    ${item.status === "published" ? `<button class="mini-btn" data-action="unpublish-announcement" data-id="${item.id}">Unpublish</button>` : ""}
+    ${item.status === "published"
+      ? `<button class="mini-btn" data-action="unpublish-announcement" data-id="${item.id}">Unpublish</button>`
+      : `<button class="mini-btn" data-action="publish-announcement" data-id="${item.id}">Publish</button>`}
     <button class="mini-btn danger" data-action="delete-announcement" data-id="${item.id}">Delete</button>
   `);
 }
@@ -704,9 +736,11 @@ function renderProjects() {
 }
 
 function projectRow(project) {
-  return row(project.title, `${(project.tags || []).join(", ") || "No tags"} · ${project.status || "open"}`, `
-    <button class="mini-btn" data-action="project-application-status" data-id="${project.id}">Application status</button>
-    <button class="mini-btn" data-action="export-project-applicants" data-id="${project.id}">Export Applicants</button>
+  // Applications are handled off-platform via the project's own applicationLink, so there is
+  // no applicant queue to review or export here.
+  const applyLink = safeUrl(project.applicationLink);
+  return row(project.title, `${(project.tags || []).join(", ") || "No tags"} · ${project.status || "open"} · ${project.postedBy || "unknown poster"}`, `
+    ${applyLink ? `<a class="mini-btn" href="${applyLink}" target="_blank" rel="noopener noreferrer">Apply link ↗</a>` : ""}
     <button class="mini-btn danger" data-action="delete-project" data-id="${project.id}">Delete</button>
   `);
 }
@@ -725,7 +759,15 @@ function renderUsers() {
 }
 
 function userRow(user) {
-  return row(user.name || user.email || user.id, `${user.email || "No email"} · ${user.role || "student"} · ${user.school || "No school"}`, "");
+  // Show the Auth UID and let the admin copy it straight into the Role Manager. The role
+  // form requires a UID, but the directory never displayed one anywhere, so no role could
+  // actually be granted through the UI.
+  const uid = user.uid || user.id || "";
+  return row(
+    user.name || user.email || user.id,
+    `${user.email || "No email"} · ${user.role || "student"} · ${user.school || "No school"} · UID ${uid || "unknown"}`,
+    uid ? `<button class="mini-btn" data-action="use-uid-for-role" data-id="${escapeHtml(uid)}" data-email="${escapeHtml(user.email || "")}">Manage role</button>` : ""
+  );
 }
 
 function renderReview() {
@@ -746,7 +788,7 @@ function renderReview() {
         <p class="eyebrow">Queue</p>
         <h3>Pending reviews</h3>
         ${listRows(state.data.contentReviews, reviewRow, "No content reviews yet.")}
-        ${state.adminCursors?.contentReviews ? `<div style="margin-top: 16px; text-align: center;"><button class="btn secondary" data-action="load-more-admin-tab">Load More</button></div>` : ""}
+        ${state.adminCursors?.review ? `<div style="margin-top: 16px; text-align: center;"><button class="btn secondary" data-action="load-more-admin-tab">Load More</button></div>` : ""}
       </article>
     </div>
   `;
@@ -825,7 +867,7 @@ function renderModeration() {
       <p class="eyebrow">Quality</p>
       <h3>Moderation flags</h3>
       ${listRows(state.data.moderationFlags, (item) => simpleRow(item.title || item.reason || "Flag", `${item.collection || "Content"} · ${item.status || "Open"}`), "No moderation flags.")}
-      ${state.adminCursors?.flags ? `<div style="margin-top: 16px; text-align: center;"><button class="btn secondary" data-action="load-more-admin-tab">Load More</button></div>` : ""}
+      ${state.adminCursors?.moderation ? `<div style="margin-top: 16px; text-align: center;"><button class="btn secondary" data-action="load-more-admin-tab">Load More</button></div>` : ""}
     </article>
   `;
 }
@@ -884,7 +926,7 @@ async function refresh() {
   render();
 }
 
-async function handleAction(action, id) {
+async function handleAction(action, id, dataset = {}) {
   if (action === "login-google") {
     const user = await window.RVUFirebase.signInWithGoogle();
     await enter(user);
@@ -931,16 +973,33 @@ async function handleAction(action, id) {
   if (action === "update-club-profile") {
     const profile = state.forms.clubProfile;
     if (!profile.clubId) return window.alert("Choose a club first.");
-    await window.RVUFirebase.updateClubProfile(profile.clubId, {
-      logoUrl: profile.logoUrl.trim(),
-      bannerUrl: profile.bannerUrl.trim(),
-      registrationForm: profile.registrationForm.trim(),
-      socials: profile.socials.split(",").map((item) => item.trim()).filter(Boolean),
-      doing: profile.doing.trim(),
-      highlights: profile.highlights.split(",").map((item) => item.trim()).filter(Boolean),
-      joinLink: profile.registrationForm.trim(),
-      registrationOpen: Boolean(profile.registrationForm.trim()),
-    });
+    /*
+     * Only write the fields the admin actually filled in.
+     *
+     * This form starts blank, so submitting it used to blank out the club's existing logo,
+     * banner, socials and highlights, and force-close registration — a club that had set all
+     * of that up lost it the moment an admin saved any single change here.
+     */
+    const patch = {};
+    const setIfFilled = (key, value) => { if (value !== "") patch[key] = value; };
+    setIfFilled("logoUrl", profile.logoUrl.trim());
+    setIfFilled("bannerUrl", profile.bannerUrl.trim());
+    setIfFilled("doing", profile.doing.trim());
+
+    const registrationForm = profile.registrationForm.trim();
+    if (registrationForm !== "") {
+      patch.registrationForm = registrationForm;
+      patch.joinLink = registrationForm;
+      patch.registrationOpen = true;
+    }
+    const socials = profile.socials.split(",").map((item) => item.trim()).filter(Boolean);
+    if (socials.length) patch.socials = socials;
+    const highlights = profile.highlights.split(",").map((item) => item.trim()).filter(Boolean);
+    if (highlights.length) patch.highlights = highlights;
+
+    if (!Object.keys(patch).length) return window.alert("Nothing to save — fill in at least one field.");
+
+    await window.RVUFirebase.updateClubProfile(profile.clubId, patch);
     state.forms.clubProfile = defaultClubProfile();
     await refresh();
     showToast("Club profile updated.");
@@ -1011,11 +1070,25 @@ async function handleAction(action, id) {
     showToast("School created.");
     return;
   }
+  // Prefill the Role Manager from the directory so the admin never has to hunt for a UID.
+  if (action === "use-uid-for-role") {
+    state.forms.role = { ...defaultRoleGrant(), uid: id || "", email: dataset.email || "" };
+    state.tab = "roles";
+    render();
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+    return;
+  }
   if (action === "grant-role") {
     const grant = state.forms.role;
-    if (!grant.email && !grant.uid) return window.alert("Email or UID is required.");
+    if (!grant.uid) return window.alert("A Firebase Auth UID is required. Open Users and press \"Manage role\" to fill it in.");
     if (grant.email && !isRvuEmail(grant.email)) return window.alert("Email must end with @rvu.edu.in.");
-    await window.RVUFirebase.grantPlatformRole(grant);
+    try {
+      await window.RVUFirebase.grantPlatformRole(grant);
+    } catch (error) {
+      // clubCore / schoolRepresentative are scoped grants and are refused here on purpose —
+      // surface the explanation rather than a silent failure.
+      return window.alert(error.message || "Could not update the role.");
+    }
     state.forms.role = defaultRoleGrant();
     await refresh();
     showToast("Role updated.");
@@ -1066,7 +1139,7 @@ async function handleAction(action, id) {
   if (action === "create-announcement") {
     const notice = state.forms.announcement;
     if (!notice.title.trim()) return window.alert("Announcement title is required.");
-    await window.RVUFirebase.createAnnouncement({ ...notice, sourceType: "admin", time: "Just now", status: "published" });
+    await window.RVUFirebase.createAnnouncement({ ...notice, sourceType: "admin", status: "published" });
     state.forms.announcement = defaultAnnouncement();
     await refresh();
     showToast("Notice created.");
@@ -1075,6 +1148,13 @@ async function handleAction(action, id) {
   if (action === "unpublish-announcement") {
     await window.RVUFirebase.updateAnnouncementStatus(id, "draft");
     await refresh();
+    showToast("Announcement moved to draft.");
+    return;
+  }
+  if (action === "publish-announcement") {
+    await window.RVUFirebase.updateAnnouncementStatus(id, "published");
+    await refresh();
+    showToast("Announcement published.");
     return;
   }
   if (action === "create-project") {
@@ -1094,14 +1174,11 @@ async function handleAction(action, id) {
     showToast("Project created.");
     return;
   }
-  if (action === "project-application-status") {
-    const userId = await promptUser("Applicant Firebase UID");
-    if (!userId) return;
-    const status = await promptUser("Status: pending, accepted, rejected", "accepted") || "accepted";
-    await window.RVUFirebase.updateProjectApplicationStatus(id, userId, status);
-    await refresh();
-    showToast("Project application updated.");
-  }
+  // "project-application-status" and "export-project-applicants" were removed along with
+  // their buttons. There is no in-app project application workflow: students apply through
+  // the project's external applicationLink, so projects/{id}/applications is never written
+  // (and has no Firestore rule). The handlers called updateProjectApplicationStatus /
+  // getProjectApplicants, neither of which exists — both threw a TypeError on click.
   if (action === "export-users") {
     downloadCSV("rvuconnect_users.csv", state.data.allUsers);
     return;
@@ -1109,11 +1186,6 @@ async function handleAction(action, id) {
   if (action === "export-rsvps") {
     const rsvps = await window.RVUFirebase.getEventRSVPs(id);
     downloadCSV(`event_${id}_rsvps.csv`, rsvps);
-    return;
-  }
-  if (action === "export-project-applicants") {
-    const apps = await window.RVUFirebase.getProjectApplicants(id);
-    downloadCSV(`project_${id}_applicants.csv`, apps);
     return;
   }
   if (action === "toggle-suspend-user") {
@@ -1148,13 +1220,15 @@ function bindEvents() {
       const tab = button.dataset.tab;
       state.tab = tab;
 
+      // Keys MUST match the data-tab ids used in the rail. "moderation" was missing, so the
+      // moderation queue never loaded and always rendered as empty.
       const mapping = {
         requests: "hostRequests",
-        flags: "moderationFlags",
+        moderation: "moderationFlags",
         users: "allUsers",
         events: "allEvents",
         announcements: "allAnnouncements",
-        review: "contentReviews"
+        review: "contentReviews",
       };
       const field = mapping[tab];
       state.loadedAdminTabs = state.loadedAdminTabs || {};
@@ -1179,7 +1253,7 @@ function bindEvents() {
       const origOpacity = button.style.opacity;
       button.style.pointerEvents = "none";
       button.style.opacity = "0.5";
-      handleAction(button.dataset.action, button.dataset.id)
+      handleAction(button.dataset.action, button.dataset.id, button.dataset)
         .catch((error) => {
           window.alert(error.message || "Action failed.");
         })

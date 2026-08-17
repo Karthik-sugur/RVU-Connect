@@ -122,16 +122,33 @@ button {
 }
 
 .tabs button,
+/*
+ * Styled for the dark rail. It is also used on the light login/denied cards, where
+ * rgba(246,240,229,0.7) on cream was effectively invisible — the only escape route out of
+ * the console could not be seen. `currentColor` inherits the surrounding card's text colour
+ * so it stays legible on both grounds.
+ */
 .link-button {
-  border: 1px solid rgba(246, 240, 229, 0.18);
+  border: 1px solid currentColor;
   background: transparent;
-  color: rgba(246, 240, 229, 0.7);
+  color: inherit;
+  opacity: 0.75;
   padding: 12px;
+  min-height: 40px;
   text-align: left;
   font-family: var(--mono);
   font-size: 10px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+.link-button:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
 }
 
 .tabs button.active,
@@ -139,6 +156,7 @@ button {
 .link-button:hover {
   background: var(--gold);
   color: var(--ink);
+  opacity: 1;
 }
 
 .rail-actions {

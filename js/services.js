@@ -263,6 +263,21 @@ function tracedWriteBatch(batchLabel) {
   };
 }
 
+/**
+ * Collects load failures for the current loadCampusData call so the UI can distinguish
+ * "nothing here yet" from "we could not load this". Previously every failure became a
+ * silent empty array and the user saw a confident empty state on an error.
+ */
+let _loadErrors = [];
+
+function beginLoadErrorCapture() {
+  _loadErrors = [];
+}
+
+function collectedLoadErrors() {
+  return _loadErrors.slice();
+}
+
 async function rowsOrEmpty(label, promise) {
   try {
     return rows(await promise);
@@ -270,6 +285,7 @@ async function rowsOrEmpty(label, promise) {
     if (error?.code !== "permission-denied") {
       console.warn(`RVU Connect could not load ${label}:`, error);
     }
+    _loadErrors.push({ label, code: error?.code || "unknown", message: error?.message || String(error) });
     return [];
   }
 }
@@ -332,6 +348,8 @@ async function saveUserProfile(uid, data) {
 
 let lastDocs = { events: null, announcements: null, projects: null };
 
+const ADMIN_PAGE_SIZE = 50;
+
 /**
  * Resolve club-core access with direct document reads (no collectionGroup).
  * Source of truth: clubs/{clubId}/coreMembers/{emailLower} with status == approved.
@@ -377,22 +395,36 @@ async function resolveOwnClubAccesses({ uid, email, clubs, clubApplications, pro
     }
   }));
 
-  // Founder email still unlocks manage UI if coreMembers was never written (legacy clubs).
+  // Legacy clubs may predate coreMembers. Repair them by writing the roster document rather
+  // than granting access off club.founderEmail alone — a standing email-only grant meant a
+  // founder who left club core kept the full management UI forever with nothing to revoke.
   for (const club of clubs || []) {
     const founder = String(club.founderEmail || "").trim().toLowerCase();
     if (!founder || founder !== emailKey) continue;
     if (seen.has(club.id)) continue;
-    seen.add(club.id);
-    memberDocs.push({
-      club,
-      member: {
+
+    const memberRef = doc(db, "clubs", club.id, "coreMembers", emailKey);
+    try {
+      const snap = await getDoc(memberRef);
+      // Membership was explicitly removed/revoked — respect that, do not re-grant.
+      if (snap.exists()) continue;
+      const member = {
+        uid: uid || "",
         email: emailKey,
-        name: club.founderName || profile.name || emailKey,
+        name: club.founderName || profile.name || emailKey.split("@")[0],
         role: "founder",
         status: "approved",
-        uid,
-      },
-    });
+        permanent: true,
+        backfilledFromFounderEmail: true,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+      await setDoc(memberRef, member, { merge: true });
+      seen.add(club.id);
+      memberDocs.push({ club, member: { ...member, id: emailKey } });
+    } catch (error) {
+      console.warn("[RVU] Could not backfill founder membership for club", club.id, error);
+    }
   }
 
   return memberDocs;
@@ -470,10 +502,20 @@ async function ensureCoreMembersFromApprovedApps(clubId) {
 }
 
 async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
+  beginLoadErrorCapture();
+  const feedQuery = async (label, q) => {
+    try {
+      return await getDocs(q);
+    } catch (error) {
+      if (error?.code !== "permission-denied") console.warn(`RVU Connect could not load ${label}:`, error);
+      _loadErrors.push({ label, code: error?.code || "unknown", message: error?.message || String(error) });
+      return { docs: [] };
+    }
+  };
   const [eventsSnap, announcementsSnap, projectsSnap] = await Promise.all([
-    getDocs(query(collection(db, "events"), where("status", "==", "published"), orderBy("createdAt", "desc"), limit(20))).catch(() => ({ docs: [] })),
-    getDocs(query(collection(db, "announcements"), where("status", "==", "published"), orderBy("createdAt", "desc"), limit(20))).catch(() => ({ docs: [] })),
-    getDocs(query(collection(db, "projects"), orderBy("createdAt", "desc"), limit(20))).catch(() => ({ docs: [] })),
+    feedQuery("events", query(collection(db, "events"), where("status", "==", "published"), orderBy("createdAt", "desc"), limit(20))),
+    feedQuery("announcements", query(collection(db, "announcements"), where("status", "==", "published"), orderBy("createdAt", "desc"), limit(20))),
+    feedQuery("projects", query(collection(db, "projects"), orderBy("createdAt", "desc"), limit(20))),
   ]);
 
   lastDocs.events = eventsSnap.docs[eventsSnap.docs.length - 1] || null;
@@ -485,42 +527,20 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
     rowsOrEmpty("site settings", getDocs(collection(db, "siteSettings"))),
   ]);
 
+  cachePlatformSettings(settingsRows);
+
   const announcementRows = rows(announcementsSnap).filter((item) => !isAnnouncementExpired(item));
 
-  // Mark / purge events past their date+time (registration/event window set at create).
-  const liveEventRows = [];
-  for (const event of rows(eventsSnap)) {
-    if (!isEventExpired(event)) {
-      liveEventRows.push({ ...event, past: false });
-      continue;
-    }
-    const canPurge = Boolean(
-      auth.currentUser
-      && (superAdmin || event.createdBy === auth.currentUser.uid)
-    );
-    if (canPurge) {
-      // Silent purge — avoid permission-trace noise when rules reject a delete.
-      await deleteDoc(doc(db, "events", event.id)).catch(() => {});
-    }
-  }
+  // Hide events past their date+time. This is a FILTER ONLY — never a delete.
+  // Deleting here previously destroyed campus history irreversibly as a side effect of
+  // simply reading the feed (a super admin login wiped every past event and orphaned its
+  // rsvps subcollection). Purging, if ever wanted, belongs in an explicit admin action.
+  const liveEventRows = rows(eventsSnap)
+    .filter((event) => !isEventExpired(event))
+    .map((event) => ({ ...event, past: false }));
 
-  // Hide projects whose expiry date has passed (end of that calendar day).
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const liveProjectRows = [];
-  for (const project of rows(projectsSnap)) {
-    const expiry = String(project.expiry || "").trim();
-    if (/^\d{4}-\d{2}-\d{2}$/.test(expiry)) {
-      const expiryDate = new Date(`${expiry}T23:59:59`);
-      if (!Number.isNaN(expiryDate.getTime()) && expiryDate.getTime() < Date.now()) {
-        if (auth.currentUser && (superAdmin || project.createdBy === auth.currentUser.uid || project.ownerId === auth.currentUser.uid)) {
-          await deleteDoc(doc(db, "projects", project.id)).catch(() => {});
-        }
-        continue;
-      }
-    }
-    liveProjectRows.push(project);
-  }
+  // Hide projects whose expiry date has passed (end of that calendar day). Filter only.
+  const liveProjectRows = rows(projectsSnap).filter((project) => !isProjectExpired(project));
 
   const data = {
     clubs: clubsRows,
@@ -675,14 +695,19 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
 
   if (superAdmin) {
     // Only load basic admin context initially, not everything.
-    const [allClubRows, allSchoolRows] = await Promise.all([
+    // moderationFlags MUST be loaded here: it was previously hard-coded to [] so student
+    // content reports were written successfully but never surfaced to any admin.
+    const [allClubRows, allSchoolRows, flagRows] = await Promise.all([
       rowsOrEmpty("all clubs", getDocs(query(collection(db, "clubs"), limit(100)))),
       rowsOrEmpty("all schools", getDocs(query(collection(db, "schools"), limit(100)))),
+      rowsOrEmpty("moderation flags", getDocs(query(collection(db, "moderationFlags"), orderBy("createdAt", "desc"), limit(ADMIN_PAGE_SIZE)))),
     ]);
     data.allClubs = allClubRows;
     data.allSchools = allSchoolRows;
+    data.moderationFlags = flagRows;
   }
 
+  data.loadErrors = collectedLoadErrors();
   return data;
 }
 
@@ -780,6 +805,13 @@ function isEventExpired(event) {
   if (!/^\d{1,2}:\d{2}:\d{2}$/.test(timeStr)) timeStr = "23:59:00";
   const dt = new Date(`${dateStr}T${timeStr}`);
   return !Number.isNaN(dt.getTime()) && dt.getTime() < Date.now();
+}
+
+function isProjectExpired(project) {
+  const expiry = String(project?.expiry || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(expiry)) return false;
+  const expiryDate = new Date(`${expiry}T23:59:59`);
+  return !Number.isNaN(expiryDate.getTime()) && expiryDate.getTime() < Date.now();
 }
 
 function isAnnouncementExpired(item) {
@@ -888,12 +920,30 @@ async function submitNewClubCreationRequest(clubDraft) {
   return docId;
 }
 
+/**
+ * Pick a free club document id. The id is derived from the club name, so two students each
+ * requesting a club with the same name previously collided — approving the second request
+ * overwrote the first club, reassigning its founder and silently discarding its profile.
+ */
+async function resolveFreeClubId(baseId, founderEmail) {
+  for (let attempt = 0; attempt < 25; attempt += 1) {
+    const candidate = attempt === 0 ? baseId : `${baseId}-${attempt + 1}`;
+    const snap = await getDoc(doc(db, "clubs", candidate));
+    if (!snap.exists()) return candidate;
+    // Re-approving the same founder's own request should reuse their club, not fork a copy.
+    const existingFounder = String(snap.data()?.founderEmail || "").trim().toLowerCase();
+    if (founderEmail && existingFounder === founderEmail) return candidate;
+  }
+  throw new Error(`Too many clubs already named like "${baseId}". Rename the club and resubmit.`);
+}
+
 async function applyNewClubApproval(requestData) {
   const memberEmail = requestData.email || requestData.founderEmail;
   const normalizedEmail = memberEmail?.trim().toLowerCase();
-  const clubId = requestData.clubId
+  const baseClubId = requestData.clubId
     || (requestData.clubName ? slugifyClubName(requestData.clubName) : null);
-  if (!clubId) throw new Error("New club request is missing a club name/id.");
+  if (!baseClubId) throw new Error("New club request is missing a club name/id.");
+  const clubId = await resolveFreeClubId(baseClubId, normalizedEmail);
 
   await tracedSetDoc(doc(db, "clubs", clubId), {
     name: requestData.clubName || clubId,
@@ -950,6 +1000,61 @@ async function updateClubRegistration(clubId, registrationOpen) {
   });
 }
 
+/**
+ * Clear the standing grants a host request created, so a rejection actually takes effect.
+ * Mirrors what approval writes: the canonical schoolRepresentative_{uid} request, the sticky
+ * users.{schoolRepApproved,clubCoreApproved} flags, and the club coreMembers roster document.
+ */
+async function revokeHostGrants(requestData = {}) {
+  const uid = requestData.uid;
+  const normalizedEmail = String(requestData.email || requestData.founderEmail || "").trim().toLowerCase();
+
+  if (requestData.type === "schoolRepresentative" && uid) {
+    const canonicalId = `schoolRepresentative_${uid}`;
+    await tracedSetDoc(doc(db, "hostRequests", canonicalId), {
+      status: "rejected",
+      updatedAt: serverTimestamp(),
+    }, { merge: true }).catch((error) => console.warn("[RVU] Could not revoke canonical school-rep request", error));
+
+    await tracedUpdateDoc(doc(db, "users", uid), {
+      schoolRepApproved: deleteField(),
+      updatedAt: serverTimestamp(),
+    }).catch((error) => console.warn("[RVU] Could not clear schoolRepApproved", error));
+
+    if (requestData.schoolId) {
+      await tracedDeleteDoc(doc(db, "schools", requestData.schoolId, "representatives", normalizedEmail || uid))
+        .catch(() => { /* representative doc may not exist */ });
+    }
+  }
+
+  if (requestData.type === "clubCore" && requestData.clubId) {
+    if (normalizedEmail) {
+      await tracedDeleteDoc(doc(db, "clubs", requestData.clubId, "coreMembers", normalizedEmail))
+        .catch(() => { /* roster doc may not exist */ });
+    }
+    if (uid) await demoteClubApplication(requestData.clubId, uid, "revoked");
+    if (uid) {
+      await tracedUpdateDoc(doc(db, "users", uid), {
+        clubCoreApproved: deleteField(),
+        updatedAt: serverTimestamp(),
+      }).catch((error) => console.warn("[RVU] Could not clear clubCoreApproved", error));
+    }
+  }
+
+  // Drop back to student only when no other grant remains.
+  if (uid) {
+    try {
+      const snap = await getDoc(doc(db, "users", uid));
+      const data = snap.exists() ? (snap.data() || {}) : {};
+      if (!data.schoolRepApproved && !data.clubCoreApproved && data.role !== "superAdmin") {
+        await tracedUpdateDoc(doc(db, "users", uid), { role: "student", updatedAt: serverTimestamp() });
+      }
+    } catch (error) {
+      console.warn("[RVU] Could not reset role after revocation", error);
+    }
+  }
+}
+
 async function updateHostRequestStatus(requestId, status) {
   requireOneOf(status, ["approved", "rejected"], "Host request status");
   const requestRef = doc(db, "hostRequests", requestId);
@@ -961,6 +1066,14 @@ async function updateHostRequestStatus(requestId, status) {
     status,
     updatedAt: serverTimestamp()
   }, { merge: true });
+
+  // Rejecting must actually revoke. The sticky grants (schoolRepApproved / clubCoreApproved and
+  // the canonical schoolRepresentative_{uid} request) are what firestore.rules trust, so leaving
+  // them set meant a rejected or demoted host kept full publishing rights indefinitely.
+  if (status === "rejected") {
+    await revokeHostGrants(requestData);
+    return;
+  }
 
   if (status !== "approved") return;
 
@@ -1018,35 +1131,82 @@ async function updateHostRequestStatus(requestId, status) {
   }
 }
 
+/*
+ * Site-settings enforcement.
+ *
+ * The admin console has always written `bannedWords` and `reviewRequired` to
+ * siteSettings/platform, but nothing ever read them — both controls were inert, so an admin
+ * who "banned" a word or switched on pre-publication review got no behaviour at all.
+ * The settings doc is cached on load (see loadCampusData) and consulted here.
+ */
+let _platformSettings = { bannedWords: [], reviewRequired: false };
+
+function cachePlatformSettings(settingsRows) {
+  const platform = (settingsRows || []).find((s) => s.id === "platform") || {};
+  _platformSettings = {
+    bannedWords: Array.isArray(platform.bannedWords) ? platform.bannedWords : [],
+    reviewRequired: Boolean(platform.reviewRequired),
+  };
+}
+
+/** Throw when user-authored text contains a banned word (whole-word, case-insensitive). */
+function assertNoBannedWords(payload, fields = ["title", "description"]) {
+  const words = (_platformSettings.bannedWords || [])
+    .map((w) => String(w || "").trim().toLowerCase())
+    .filter(Boolean);
+  if (!words.length) return;
+  const haystack = fields.map((f) => String(payload?.[f] || "")).join(" ").toLowerCase();
+  const hit = words.find((word) => new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(haystack));
+  if (hit) throw new Error(`"${hit}" is not allowed in campus content. Please reword and try again.`);
+}
+
+/**
+ * Resolve the status a new piece of content should be created with.
+ * When reviewRequired is on, content starts as a draft so an admin has to publish it.
+ * Super admins bypass the queue — they are the reviewers.
+ */
+async function resolvePublishStatus(requested) {
+  const wanted = requested || "published";
+  if (wanted !== "published") return wanted;
+  if (!_platformSettings.reviewRequired) return wanted;
+  if (await hasSuperAdminGrant(auth.currentUser)) return wanted;
+  return "draft";
+}
+
 async function createEvent(payload) {
   if (payload?.hostType === "school") {
     await assertCanCreateSchoolContent();
   }
+  assertNoBannedWords(payload);
+  const status = await resolvePublishStatus(payload.status);
   const ref = await tracedAddDoc(collection(db, "events"), {
     ...payload,
-    status: payload.status || "published",
+    status,
     createdBy: auth.currentUser?.uid,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
-  return { id: ref.id, ...payload, createdAt: new Date().toISOString() };
+  return { id: ref.id, ...payload, status, createdAt: new Date().toISOString() };
 }
 
 async function createAnnouncement(payload) {
   if (payload?.sourceType === "school") {
     await assertCanCreateSchoolContent();
   }
+  assertNoBannedWords(payload);
+  const status = await resolvePublishStatus(payload.status);
   const ref = await tracedAddDoc(collection(db, "announcements"), {
     ...payload,
-    status: payload.status || "published",
+    status,
     createdBy: auth.currentUser?.uid,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
-  return { id: ref.id, ...payload, createdAt: new Date().toISOString() };
+  return { id: ref.id, ...payload, status, createdAt: new Date().toISOString() };
 }
 
 async function createProject(payload) {
+  assertNoBannedWords(payload);
   const status = requireOneOf(payload.status || "open", ["open", "closed"], "Project status");
   const ref = await tracedAddDoc(collection(db, "projects"), {
     ...payload,
@@ -1063,10 +1223,14 @@ async function createProject(payload) {
 
 async function updateUserRole(uid, role) {
   requireOneOf(role, ["student", "clubCore", "schoolRepresentative", "superAdmin"], "User role");
-  await tracedUpdateDoc(doc(db, "users", uid), {
-    role,
-    updatedAt: serverTimestamp(),
-  });
+  const patch = { role, updatedAt: serverTimestamp() };
+  // Demoting to student must clear the sticky grants the rules actually trust, otherwise the
+  // user keeps school-rep/club-core publishing rights while displaying as a student.
+  if (role === "student") {
+    patch.schoolRepApproved = deleteField();
+    patch.clubCoreApproved = deleteField();
+  }
+  await tracedUpdateDoc(doc(db, "users", uid), patch);
 }
 
 async function createClub(payload) {
@@ -1137,11 +1301,27 @@ async function grantPlatformRole({ email, uid, role }) {
   }
   
   if (role === "student") {
-    await tracedDeleteDoc(doc(db, "superAdmins", uid));
+    await tracedDeleteDoc(doc(db, "superAdmins", uid)).catch(() => { /* may not exist */ });
     await updateUserRole(uid, "student");
     return;
   }
-  
+
+  // A bare users.role write does NOT grant hosting rights — access is resolved from the club
+  // coreMembers roster (club core) or the sticky schoolRepApproved flag (school rep). Writing
+  // only the role left the user permanently stuck on "Waiting for approval", so require the
+  // caller to supply the scope and write the grant the rules actually read.
+  if (role === "clubCore") {
+    throw new Error(
+      "Club core is granted per club. Use Clubs → Manage core team to add this member to a specific club."
+    );
+  }
+
+  if (role === "schoolRepresentative") {
+    throw new Error(
+      "School representative is granted by approving the user's School Rep request under Host Requests, which records the school scope."
+    );
+  }
+
   await updateUserRole(uid, role || "student");
 }
 
@@ -1170,9 +1350,36 @@ async function listClubCoreMembers(clubId) {
   return rows(snap).filter((m) => (m.status || "approved") === "approved");
 }
 
+/** Remove another member from a club's core team. Demotes their standing grant too (see leaveClubCore). */
 async function removeClubCoreRole(clubId, email) {
   const normalizedEmail = email.trim().toLowerCase();
-  await tracedDeleteDoc(doc(db, "clubs", clubId, "coreMembers", normalizedEmail));
+  const memberRef = doc(db, "clubs", clubId, "coreMembers", normalizedEmail);
+  let memberUid = "";
+  try {
+    const snap = await getDoc(memberRef);
+    memberUid = snap.exists() ? (snap.data()?.uid || "") : "";
+  } catch (_) { /* fall through to the delete */ }
+
+  if (memberUid) {
+    await demoteClubApplication(clubId, memberUid, "revoked");
+  } else {
+    // No uid on the roster doc — find the approved application by email instead.
+    try {
+      const byEmail = await getDocs(query(
+        collection(db, "clubApplications"),
+        where("clubId", "==", clubId),
+        where("email", "==", normalizedEmail),
+        where("status", "==", "approved"),
+        limit(10)
+      ));
+      await Promise.all(byEmail.docs.map((row) =>
+        updateDoc(row.ref, { status: "revoked", revokedAt: serverTimestamp(), updatedAt: serverTimestamp() }).catch(() => {})
+      ));
+    } catch (error) {
+      console.warn("[RVU] Could not demote club application by email", normalizedEmail, error);
+    }
+  }
+  await tracedDeleteDoc(memberRef);
 }
 
 async function updateClubLeadership(clubId, data) {
@@ -1230,12 +1437,16 @@ async function updateAnnouncementStatus(announcementId, status) {
   });
 }
 
+/** Also refreshes the local settings cache so enforcement applies without a reload. */
 async function updateSiteSetting(settingId, data) {
   await tracedSetDoc(doc(db, "siteSettings", settingId), {
     ...data,
     updatedBy: auth.currentUser?.uid,
     updatedAt: serverTimestamp(),
   }, { merge: true });
+  if (settingId === "platform") {
+    cachePlatformSettings([{ id: "platform", ..._platformSettings, ...data }]);
+  }
 }
 
 async function createContentReview(payload) {
@@ -1292,12 +1503,54 @@ async function unfollowClub(clubId) {
   await tracedDeleteDoc(ref);
 }
 
+/**
+ * Revoke the caller's own club-core membership.
+ *
+ * The approved clubApplication MUST be demoted in the same operation. It is the standing
+ * grant that ensureOwnCoreMembersFromApplications / ensureCoreMembersFromApprovedApps read
+ * from, so deleting only the roster document meant the membership was silently recreated the
+ * next time anyone opened the club page — access could never actually be revoked.
+ */
 async function leaveClubCore(clubId) {
   const user = auth.currentUser;
   if (!user?.email) throw new Error("Sign in first.");
   if (!clubId) throw new Error("Club id required.");
   const email = user.email.trim().toLowerCase();
+  await demoteClubApplication(clubId, user.uid, "withdrawn");
   await tracedDeleteDoc(doc(db, "clubs", clubId, "coreMembers", email));
+}
+
+/**
+ * Mark the standing club-core grant as no longer approved so the self-heal paths ignore it.
+ * Best-effort: a legacy auto-id application may not be writable by this caller, in which case
+ * the deterministic doc is still cleared and that is what the heal paths consult.
+ */
+async function demoteClubApplication(clubId, uid, status) {
+  if (!clubId || !uid) return;
+  const ref = doc(db, "clubApplications", `${clubId}_${uid}`);
+  try {
+    const snap = await getDoc(ref);
+    if (snap.exists()) {
+      await updateDoc(ref, { status, revokedAt: serverTimestamp(), updatedAt: serverTimestamp() });
+    }
+  } catch (error) {
+    console.warn("[RVU] Could not demote club application", `${clubId}_${uid}`, error);
+  }
+  // Legacy auto-id applications for the same club/user.
+  try {
+    const legacy = await getDocs(query(
+      collection(db, "clubApplications"),
+      where("uid", "==", uid),
+      where("clubId", "==", clubId),
+      where("status", "==", "approved"),
+      limit(10)
+    ));
+    await Promise.all(legacy.docs.map((row) =>
+      updateDoc(row.ref, { status, revokedAt: serverTimestamp(), updatedAt: serverTimestamp() }).catch(() => {})
+    ));
+  } catch (_) {
+    /* deterministic doc above is the one the heal paths read */
+  }
 }
 
 async function flagContent(payload) {
@@ -1319,9 +1572,51 @@ async function getEventRSVPs(eventId) {
   return rows(snap);
 }
 
-async function getProjectApplicants(projectId) {
-  const snap = await getDocs(collection(db, "projects", projectId, "applications"));
-  return rows(snap);
+const RSVP_STATUSES = ["going", "interested"];
+
+/**
+ * Record the signed-in user's RSVP for an event.
+ * Written to both locations the app reads from: events/{id}/rsvps/{uid} is the attendance
+ * record the host and admins read, users/{uid}/rsvps/{eventId} is the copy the student's
+ * own profile lists. Both paths are permitted by firestore.rules for the owner.
+ */
+async function setEventRsvp(event, status = "going") {
+  const user = auth.currentUser;
+  if (!user) throw new Error("Sign in to RSVP.");
+  const eventId = typeof event === "string" ? event : event?.id;
+  if (!eventId) throw new Error("Event id required.");
+  requireOneOf(status, RSVP_STATUSES, "RSVP status");
+
+  const email = String(user.email || "").trim().toLowerCase();
+  const title = (typeof event === "object" && event?.title) || "";
+
+  await tracedSetDoc(doc(db, "events", eventId, "rsvps", user.uid), {
+    uid: user.uid,
+    email,
+    name: user.displayName || email.split("@")[0],
+    status,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  }, { merge: true });
+
+  await tracedSetDoc(doc(db, "users", user.uid, "rsvps", eventId), {
+    eventId,
+    title,
+    status,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  }, { merge: true });
+
+  return { id: eventId, eventId, title, status };
+}
+
+/** Withdraw the signed-in user's RSVP from both locations. */
+async function removeEventRsvp(eventId) {
+  const user = auth.currentUser;
+  if (!user) throw new Error("Sign in first.");
+  if (!eventId) throw new Error("Event id required.");
+  await tracedDeleteDoc(doc(db, "events", eventId, "rsvps", user.uid));
+  await tracedDeleteDoc(doc(db, "users", user.uid, "rsvps", eventId));
 }
 
 // ── Club Application functions ──
@@ -1561,10 +1856,16 @@ async function loadMore(collectionName) {
   } else if (collectionName === "projects" && lastDocs.projects) {
     q = query(collection(db, "projects"), orderBy("createdAt", "desc"), startAfter(lastDocs.projects), limit(20));
   } else {
-    return [];
+    return { items: [], exhausted: true, fetched: 0, error: null };
   }
 
-  const snap = await getDocs(q).catch(() => ({ docs: [] }));
+  let snap;
+  try {
+    snap = await getDocs(q);
+  } catch (error) {
+    // Distinguish "nothing left" from "the query failed" — the caller shows different copy.
+    return { items: [], exhausted: false, error: handleFirebaseError(error, "Could not load more") };
+  }
   if (snap.docs.length > 0) {
     lastDocs[collectionName] = snap.docs[snap.docs.length - 1];
   }
@@ -1575,7 +1876,17 @@ async function loadMore(collectionName) {
   if (collectionName === "events") {
     result = result.filter((item) => !isEventExpired(item)).map((item) => ({ ...item, past: false }));
   }
-  return result;
+  if (collectionName === "projects") {
+    result = result.filter((item) => !isProjectExpired(item));
+  }
+  // A page can be fetched and then fully filtered out (all expired). That is NOT exhaustion —
+  // reporting "No more items" there hid live records further down the collection.
+  return {
+    items: result,
+    exhausted: snap.docs.length === 0,
+    fetched: snap.docs.length,
+    error: null,
+  };
 }
 
 async function loadAdminTab(tabName, lastDocId = null) {
@@ -1583,29 +1894,62 @@ async function loadAdminTab(tabName, lastDocId = null) {
   
   const map = {
     requests: "hostRequests",
+    // Both spellings are in use across the two consoles. "moderation" was previously
+    // unmapped, so the moderation queue silently returned zero rows forever.
     flags: "moderationFlags",
+    moderation: "moderationFlags",
     users: "users",
     events: "events",
     announcements: "announcements",
     contentReviews: "contentReviews",
-    review: "contentReviews"
+    review: "contentReviews",
+    reviews: "contentReviews",
+    clubs: "clubs",
+    schools: "schools",
+    projects: "projects",
   };
-  
-  const colName = map[tabName];
-  if (!colName) return { docs: [], lastDocId: null };
 
-  let q = query(collection(db, colName), limit(50));
+  const colName = map[tabName];
+  if (!colName) {
+    console.warn("[RVU] loadAdminTab called with unknown tab", tabName);
+    return { docs: [], lastDocId: null, error: `Unknown admin tab "${tabName}".` };
+  }
+
+  // Order newest-first so a paged queue is stable and the first page is the page that matters.
+  // Without an orderBy the "first 50 by document id" is effectively random, which made queues
+  // look empty or complete when they were neither.
+  const buildQuery = (cursor) => {
+    const clauses = [orderBy("createdAt", "desc")];
+    if (cursor) clauses.push(startAfter(cursor));
+    clauses.push(limit(ADMIN_PAGE_SIZE));
+    return query(collection(db, colName), ...clauses);
+  };
+
+  let cursor = null;
   if (lastDocId) {
-    const docSnap = await getDoc(doc(db, colName, lastDocId));
-    if (docSnap.exists()) {
-      q = query(collection(db, colName), startAfter(docSnap), limit(50));
+    const docSnap = await getDoc(doc(db, colName, lastDocId)).catch(() => null);
+    if (docSnap?.exists()) cursor = docSnap;
+  }
+
+  let snap;
+  try {
+    snap = await getDocs(buildQuery(cursor));
+  } catch (error) {
+    // Documents predating createdAt are invisible to an orderBy query, and a missing composite
+    // index throws. Fall back to an unordered page rather than showing a false empty state.
+    console.warn(`[RVU] Ordered ${colName} query failed, falling back to unordered`, error);
+    try {
+      const clauses = cursor ? [startAfter(cursor), limit(ADMIN_PAGE_SIZE)] : [limit(ADMIN_PAGE_SIZE)];
+      snap = await getDocs(query(collection(db, colName), ...clauses));
+    } catch (fallbackError) {
+      return { docs: [], lastDocId: null, error: handleFirebaseError(fallbackError) };
     }
   }
-  
-  const snap = await getDocs(q).catch(() => ({ docs: [] }));
-  return { 
-    docs: rows(snap), 
-    lastDocId: snap.docs.length > 0 ? snap.docs[snap.docs.length - 1].id : null 
+
+  return {
+    docs: rows(snap),
+    lastDocId: snap.docs.length > 0 ? snap.docs[snap.docs.length - 1].id : null,
+    hasMore: snap.docs.length === ADMIN_PAGE_SIZE,
   };
 }
 
@@ -1651,6 +1995,7 @@ window.RVUFirebase = {
   approveClubApplication,
   rejectClubApplication,
   isEventExpired,
+  isProjectExpired,
   isAnnouncementExpired,
   unfollowClub,
   updateAnnouncementStatus,
@@ -1666,7 +2011,8 @@ window.RVUFirebase = {
   updateUserRole,
   removeClubCoreRole,
   getEventRSVPs,
-  getProjectApplicants,
+  setEventRsvp,
+  removeEventRsvp,
   signOut: () => {
     _cachedSuperAdminResult = null;
     return signOut(auth);

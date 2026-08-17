@@ -76,7 +76,7 @@ Most university ecosystems suffer from critical inefficiencies:
 - Moderate all platform content
 - Manage clubs, events, and user roles
 - Approve leadership and host requests
-- Track activity with audit logs
+- Review flagged content and moderation reports
 - Maintain governance and compliance
 
 ---
@@ -89,7 +89,7 @@ Most university ecosystems suffer from critical inefficiencies:
 |---|---|
 | **Email + Password** | RVU email-based registration and login |
 | **Google Sign-In** | RVU domain-restricted Google OAuth |
-| **Domain Enforcement** | Only `@rvu.edu.in` emails permitted |
+| **Domain Enforcement** | Only `@rvu.edu.in` emails permitted — enforced in the client, the admin console, **and** `firestore.rules` |
 | **Role-Based Access** | Permissions tied to user roles |
 | **Firestore Rules** | Server-side security enforcement |
 
@@ -122,16 +122,16 @@ The platform implements a hierarchical role system with four tiers:
 │  Club events · Announcements · Member management    │
 ├─────────────────────────────────────────────────────┤
 │                  Student                            │
-│  Browse · RSVP · Apply · Save · Follow              │
+│  Browse · RSVP · Save · Follow · Post projects       │
 └─────────────────────────────────────────────────────┘
 ```
 
 | Role | Permissions | Assignment |
 |---|---|---|
-| **Student** | View clubs/events/announcements, apply for projects, RSVP, save content | Default for all new users |
+| **Student** | View clubs/events/announcements, RSVP to events, post projects, save content, follow clubs | Default for all new users |
 | **Club Core Member** | Create events & announcements, manage club info, control registrations | Host Request → Admin Approval |
 | **School Representative** | Publish school updates, create events, manage school-level communication | Host Request → Admin Approval |
-| **Super Admin** | Create clubs, approve requests, moderate content, manage users, access audit logs | System-assigned |
+| **Super Admin** | Create clubs, approve requests, moderate content, manage users, configure site settings | System-assigned |
 
 ---
 
@@ -148,7 +148,7 @@ The platform implements a hierarchical role system with four tiers:
 
 - **Event Creation** — Authorized hosts create club or school events with full details (title, description, date, time, location, tags)
 - **Event Discovery** — Browse, search, and filter events across campus
-- **RSVP System** — Students mark attendance intent; the system maintains participation records
+- **RSVP System** — Students mark **Going** or **Interested**; the RSVP is written to both `events/{id}/rsvps/{uid}` and `users/{uid}/rsvps/{eventId}`, and hosts can export their event's attendee list
 
 ---
 
@@ -165,8 +165,11 @@ Organizations can publish:
 ### 🤝 Project Collaboration
 
 - **Create Projects** — Define title, description, required skills, contact info, and application deadlines
-- **Application Workflow** — Students submit applications; project owners review, accept, or reject
-- **Status Tracking** — Both applicants and owners track application progress
+- **Reaching Out** — Students contact the poster directly by email/phone, or via the project's external application link (a Google Form or similar)
+- **Owner Controls** — Posters open or close their project to collaborators, and delete it when finished
+
+> **Note:** applications are handled off-platform through the external link. There is no in-app
+> application queue, review step, or accept/reject flow.
 
 ---
 
@@ -175,7 +178,7 @@ Organizations can publish:
 - Content flagging by users
 - Review queue for administrators
 - Administrative moderation actions
-- Full audit logging for accountability
+- Moderation flags surfaced to admins in a review queue
 
 ---
 
@@ -187,7 +190,7 @@ Organizations can publish:
 | **Club Management** | Create clubs, assign leadership, manage approvals |
 | **Event Management** | Review events, publish/unpublish content |
 | **Host Requests** | Approve Club Core Members and School Representatives |
-| **Audit Logs** | Track all administrative actions for governance |
+| **Site Settings** | Platform tags, banned words, and pre-publication review toggle |
 
 ---
 
@@ -225,7 +228,7 @@ Organizations can publish:
 │    Auth  │  Firestore  │  Hosting                │
 ├──────────────────────────────────────────────────┤
 │               Cloud Firestore                    │
-│  Users │ Clubs │ Events │ Projects │ Audit Logs  │
+│  Users │ Clubs │ Events │ Projects │ Moderation │
 └──────────────────────────────────────────────────┘
 ```
 
@@ -244,7 +247,6 @@ Organizations can publish:
 | `projects` | Collaborative project listings |
 | `hostRequests` | Pending role elevation requests |
 | `moderationFlags` | Flagged content for review |
-| `auditLogs` | Administrative action records |
 | `contentReviews` | Moderation review history |
 | `schools` | School/department information |
 | `siteSettings` | Platform configuration |
@@ -308,7 +310,7 @@ The complete security rules are defined in [`firestore.rules`](firestore.rules).
 
 2. **Configure Firebase**
    
-   Update the Firebase configuration in [`firebase.js`](firebase.js) with your project credentials:
+   Update the Firebase configuration in [`js/config.js`](js/config.js) with your project credentials:
    ```javascript
    const firebaseConfig = {
      apiKey: "YOUR_API_KEY",
@@ -338,15 +340,43 @@ The complete security rules are defined in [`firestore.rules`](firestore.rules).
 
 ---
 
+## 🧪 Testing
+
+```bash
+npm install
+npm test          # syntax check + Firestore rules tests (needs Java for the emulator)
+npm run lint      # parse every ES module on its own
+npm run test:rules
+```
+
+`tests/firestore.rules.test.js` runs against the Firestore emulator and covers the security
+boundaries that matter most:
+
+| Area | What is asserted |
+|---|---|
+| Privilege escalation | A user cannot self-grant `schoolRepApproved` / `clubCoreApproved` / `hostApproved`, on create or update |
+| Role integrity | A user cannot create their profile as `superAdmin`, or change their own `role` |
+| Domain gate | Non-`@rvu.edu.in` and unauthenticated accounts cannot read campus data |
+| Club rosters | Ordinary students can read a club's core team; outsiders cannot |
+| RSVPs | A student may write only their own RSVP; hosts and admins may read the event's list |
+| Host requests | A user may only ever write `status: 'pending'` to their own request — no self-approval |
+
+---
+
 ## 🧪 Demo Mode
 
-The application includes a built-in **demo environment** for:
+The student app includes a **demo environment** (the *Explore demo* button on the landing page) for:
 
 - 🎤 Faculty presentations and reviews
 - 🖥️ Product demonstrations
-- 🧪 Development and QA testing
+- 🧪 Front-end development without Firebase credentials
 
-Demo mode uses pre-loaded sample campus data without interacting with production records, making it safe for showcases.
+Demo mode uses pre-loaded sample campus data and never writes to Firestore.
+
+> **Do not treat a passing demo as a passing test.** The fixtures in `sample-data.js` use loose
+> display dates (`"May 22"`, no year) rather than the `YYYY-MM-DD` format real records use, so
+> date parsing, expiry filtering and chronological sorting all behave differently there. The
+> Super Admin console deliberately does **not** load demo data — it shows live records only.
 
 ---
 
@@ -354,15 +384,33 @@ Demo mode uses pre-loaded sample campus data without interacting with production
 
 ```
 rvuconnect-main/
-├── index.html              # Main student application entry point
-├── script.js               # Core SPA logic and routing
+├── index.html              # Student application entry point
+├── admin.html              # Super Admin console entry point
 ├── styles.css              # Student application styles
-├── admin.html              # Admin console entry point
-├── admin.js                # Admin console logic
 ├── admin.css               # Admin console styles
-├── firebase.js             # Firebase configuration and services
+├── admin.js                # Admin console logic
+├── sample-data.js          # Demo fixtures (student app demo mode only)
 ├── firestore.rules         # Firestore security rules
-├── sample-data.js          # Demo/sample data loader
+├── firestore.indexes.json  # Composite index definitions
+├── js/
+│   ├── main.js             # Event delegation and all action handlers
+│   ├── ui.js               # Every view and modal (template strings)
+│   ├── render-admin.js     # In-app club-core / school-rep dashboards
+│   ├── services.js         # Firestore data layer (window.RVUFirebase)
+│   ├── auth.js             # Session lifecycle, role predicates, polling
+│   ├── router.js           # Routing, deep links, overlay dismissal
+│   ├── state.js            # Global state and collections
+│   ├── utils.js            # escapeHtml/safeUrl, formatting, form helpers
+│   ├── validation.js       # Payload validation
+│   ├── config.js           # Firebase + App Check configuration
+│   ├── firebase-init.js    # Firebase SDK initialisation
+│   ├── constants.js        # Roles, statuses, routes, email domain
+│   ├── errors.js           # Error mapping and toasts
+│   ├── dialogs.js, toast.js, logger.js, repository.js
+├── tests/
+│   └── firestore.rules.test.js   # Rules tests (emulator)
+├── scripts/
+│   └── check-syntax.mjs    # ES module parse check
 └── assets/
     └── rv-university-logo-gold.png   # University branding
 ```
@@ -376,12 +424,12 @@ rvuconnect-main/
 | ✅ | Authentication & Onboarding | Complete |
 | ✅ | Role Management System | Complete |
 | ✅ | Club Management | Complete |
-| ✅ | Event System & RSVP | Complete |
+| ✅ | Event System & RSVP | Complete — going / interested, stored per event and per user |
 | ✅ | Announcement Publishing | Complete |
 | ✅ | Project Collaboration | Complete |
 | ✅ | Content Moderation | Complete |
 | ✅ | Administrative Console | Complete |
-| ✅ | Audit Logging | Complete |
+| 🔜 | Audit Logging | Planned |
 | 🔜 | Push Notifications | Planned |
 | 🔜 | Event Check-In System | Planned |
 | 🔜 | Advanced Search & Filters | Planned |

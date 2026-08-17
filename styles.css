@@ -250,11 +250,60 @@ p {
   background: linear-gradient(180deg, var(--ink) 0, var(--ink-soft) 150px, var(--paper) 150px);
 }
 
+/*
+ * Demo-mode banner. Sits directly under the sticky topbar.
+ * It previously used an inline `top: 56px`, which is shorter than the topbar itself
+ * (76px desktop / 64px mobile), so the banner overlapped the header on every screen.
+ * Driven off the same custom property as the topbar height so the two cannot drift.
+ */
+:root {
+  --topbar-h: 76px;
+}
+
+.demo-banner {
+  position: sticky;
+  top: var(--topbar-h);
+  z-index: 19;
+  background: #1a1a1a;
+  border-bottom: 1.5px solid #D7AC54;
+  padding: 8px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.demo-banner p {
+  font-size: 12px;
+  font-weight: 600;
+  color: #D7AC54;
+  margin: 0;
+  font-family: inherit;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.demo-banner button {
+  background: #D7AC54;
+  color: #1a1a1a;
+  border: none;
+  padding: 8px 16px;
+  min-height: 40px;
+  font-size: 11px;
+  font-weight: 800;
+  font-family: inherit;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
 .topbar {
   position: sticky;
   top: 0;
   z-index: 20;
-  min-height: 76px;
+  min-height: var(--topbar-h);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -772,14 +821,18 @@ p {
   right: 0;
   bottom: 0;
   height: 72px;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  /* Flex with `flex: 1 1 0` on the items cannot exceed the container, whereas the previous
+     grid rounded each of the six columns up and overflowed a 320px viewport by a few px. */
+  display: flex;
   border-top: 1px solid rgba(208, 168, 99, 0.26);
   background: rgba(18, 25, 29, 0.97);
   backdrop-filter: blur(18px);
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .nav-item {
+  flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
   display: grid;
@@ -828,8 +881,12 @@ p {
 
 .modal {
   width: min(620px, 100%);
+  /* dvh tracks the *visible* viewport, so the submit button stays reachable when mobile
+     browser chrome or the on-screen keyboard is showing. vh is the fallback for old browsers. */
   max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
   overflow: auto;
+  overscroll-behavior: contain;
   border: 1px solid rgba(208, 168, 99, 0.58);
   border-radius: 8px;
   padding: 20px;
@@ -1162,10 +1219,23 @@ p {
     background: linear-gradient(180deg, var(--ink) 0, var(--ink-soft) 118px, var(--paper) 118px);
   }
 
+  :root {
+    --topbar-h: 64px;
+  }
+
   .topbar {
-    min-height: 64px;
+    min-height: var(--topbar-h);
     padding: 9px 12px;
     gap: 8px;
+  }
+
+  .demo-banner {
+    padding: 8px 12px;
+  }
+
+  .demo-banner p {
+    font-size: 11px;
+    letter-spacing: 0.06em;
   }
 
   .topbar .brand-logo {

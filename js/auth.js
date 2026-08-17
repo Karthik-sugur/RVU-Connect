@@ -2,6 +2,7 @@ import { replaceCollection } from './utils.js';
 import { schools, interests, events, clubs, announcements, projects, state } from './state.js';
 import { render, renderAtTop } from './ui.js';
 import { applyDemoCampusData } from '../sample-data.js';
+import { EMAIL_DOMAIN } from './constants.js';
 
 export function isClubCore() {
   return Boolean(state._hasClubCore) || state.role === "club-core";
@@ -97,11 +98,30 @@ export async function softRefreshCampusData({ showSkeleton = false } = {}) {
 let _pendingAccessPoll = null;
 let _expiryRefreshPoll = null;
 
+/** True when the user is mid-interaction and a full re-render would destroy their work. */
+function hasOpenUserInput() {
+  if (state.createEventOpen || state.editEventOpen || state.createAnnouncementOpen
+    || state.editAnnouncementOpen || state.createProjectOpen || state.editProfileOpen
+    || state.editClubOpen || state.createOpen || state.searchOpen || state.loginOpen
+    || state.onboardingStep || state._clubApplyModalOpen) {
+    return true;
+  }
+  // Any focused field with content, anywhere (covers modals this list does not know about).
+  const active = document.activeElement;
+  if (active && /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName)) return true;
+  return false;
+}
+
 export function startPendingAccessPolling() {
   stopPendingAccessPolling();
   if (!state.authUser) return;
   _pendingAccessPoll = window.setInterval(async () => {
     if (!state.authUser || state.isDemoMode) return;
+    // Never blow away a form the user is filling in. The poll re-renders the whole app via
+    // innerHTML, which previously discarded half-typed events, projects and profile edits.
+    if (hasOpenUserInput()) return;
+
+    const wasApproved = (isClubCore() || isSchoolRep()) && state.host.approved;
     const wasPending = (isClubCore() || isSchoolRep()) && !state.host.approved;
     const wasStudent = state.role === "student";
     const hadPendingApps = (state.clubApplications || []).some((a) => a.status === "pending")
@@ -109,13 +129,21 @@ export function startPendingAccessPolling() {
     try {
       await softRefreshCampusData({ showSkeleton: false });
       const nowHost = (isClubCore() || isSchoolRep()) && state.host.approved;
-      if ((wasPending || wasStudent || hadPendingApps) && nowHost) {
-        stopPendingAccessPolling();
+      // Only announce a genuine transition into approved access. Announcing whenever
+      // "nowHost" was true fired a false "approved" toast at an already-approved user who
+      // had merely applied for a second role, and stopped the poll before the real approval.
+      const becameApproved = !wasApproved && nowHost;
+      if (becameApproved && (wasPending || wasStudent || hadPendingApps)) {
         window.dispatchEvent(new CustomEvent("rvu-toast", {
           detail: { message: "Your access was approved. Admin tools are ready.", type: "success" },
         }));
         renderAtTop();
       }
+      // Keep polling while anything is still pending, so a second role approval is noticed too.
+      const stillPending = (state.clubApplications || []).some((a) => a.status === "pending")
+        || (state.hostRequests || []).some((r) => r.status === "pending" && r.uid === state.authUser?.uid)
+        || ((isClubCore() || isSchoolRep()) && !state.host.approved);
+      if (!stillPending && becameApproved) stopPendingAccessPolling();
     } catch (_) {
       /* keep polling */
     }
@@ -134,6 +162,8 @@ export function startExpiryRefreshPolling() {
   stopExpiryRefreshPolling();
   _expiryRefreshPoll = window.setInterval(() => {
     if (!state.authed || state.isDemoMode) return;
+    // Same rule as the access poller: never re-render over a form in progress.
+    if (hasOpenUserInput()) return;
     let changed = false;
     const nextEvents = events.filter((event) => {
       const expired = Boolean(normalizeEvent(event).past);
@@ -209,8 +239,14 @@ export function activeClub() {
   };
 }
 
+/**
+ * RVU Connect is restricted to RV University accounts. This must agree with
+ * isRvuEmail() in js/services.js, isRvuEmail() in admin.js and isRvuEmail() in
+ * firestore.rules — they previously disagreed, so the UI accepted addresses the
+ * sign-in path then rejected with a forced sign-out.
+ */
 export function isAllowedRvuEmail(email) {
-  return typeof email === "string" && email.trim().includes("@");
+  return typeof email === "string" && email.trim().toLowerCase().endsWith(EMAIL_DOMAIN);
 }
 
 export async function syncFirebaseData({ quiet = false } = {}) {
@@ -244,6 +280,21 @@ export async function syncFirebaseData({ quiet = false } = {}) {
     state.onboardingStep = "role";
   }
   const data = await window.RVUFirebase.loadCampusData({ superAdmin: state.role === "admin", profile });
+  state.loadErrors = data.loadErrors || [];
+
+  // Anyone who has already submitted a host request or club application has finished
+  // onboarding, even while it is still pending. Without this the blocking role-picker modal
+  // re-opened on every load for pending club-core applicants, with no way to finish or exit.
+  const hasSubmittedHostIntent = (data.hostRequests || []).length > 0
+    || (data.clubApplications || []).length > 0;
+  if (hasSubmittedHostIntent && state.onboardingStep) {
+    state.onboardingStep = null;
+    if (!profile.onboardingComplete) {
+      // Persist it so the next load does not depend on re-reading those collections.
+      window.RVUFirebase.saveUserProfile(state.authUser.uid, { onboardingComplete: true })
+        .catch((error) => console.warn("[RVU] Could not persist onboardingComplete", error));
+    }
+  }
   replaceCollection(clubs, data.clubs);
   replaceCollection(events, data.events.map(normalizeEvent));
   replaceCollection(announcements, data.announcements);
@@ -295,24 +346,40 @@ export async function syncFirebaseData({ quiet = false } = {}) {
   state.dataLoading = false;
 }
 
+/** Local Date for an event's start, or null when the date is not a parseable YYYY-MM-DD. */
+export function eventStartDate(event) {
+  const dateStr = String(event?.date || event?.displayDate || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return null;
+  let timeStr = String(event.time || "23:59").trim();
+  if (/^\d{1,2}:\d{2}$/.test(timeStr)) timeStr = `${timeStr}:00`;
+  if (!/^\d{1,2}:\d{2}:\d{2}$/.test(timeStr)) timeStr = "23:59:00";
+  const dt = new Date(`${dateStr}T${timeStr}`);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
 export function normalizeEvent(event) {
   const eventDate = event.date || event.displayDate || "";
+  const startsAt = eventStartDate(event);
   let past = Boolean(event.past);
-  if (!past && eventDate && /^\d{4}-\d{2}-\d{2}$/.test(String(eventDate).trim())) {
-    let timeStr = String(event.time || "23:59").trim();
-    if (/^\d{1,2}:\d{2}$/.test(timeStr)) timeStr = `${timeStr}:00`;
-    if (!/^\d{1,2}:\d{2}:\d{2}$/.test(timeStr)) timeStr = "23:59:00";
-    const dt = new Date(`${String(eventDate).trim()}T${timeStr}`);
-    if (!Number.isNaN(dt.getTime())) past = dt.getTime() < Date.now();
-  }
+  if (!past && startsAt) past = startsAt.getTime() < Date.now();
+
   return {
     colors: ["#233039", "#926d2f"],
     tags: [],
-    sort: 999,
     ...event,
     date: eventDate,
     past,
+    startsAtMs: startsAt ? startsAt.getTime() : null,
+    // Real chronological sort key. This was hard-coded to 999 for every event, so
+    // "soonest first" and the Home "Next up" spotlight were really "most recently created".
+    // Undated events sort last rather than first.
+    sort: startsAt ? startsAt.getTime() : Number.MAX_SAFE_INTEGER,
   };
+}
+
+/** Chronological comparator for events — soonest first, undated last. */
+export function bySoonest(a, b) {
+  return (a?.sort ?? Number.MAX_SAFE_INTEGER) - (b?.sort ?? Number.MAX_SAFE_INTEGER);
 }
 
 export function hydrateCampusState(data) {
@@ -342,6 +409,9 @@ export async function enterAuthenticatedApp(user) {
   }
   state.authed = true;
   state.authUser = user;
+  // Leaving demo mode set kept the "no data is being saved" banner (and its demo-only
+  // behaviour) in a real signed-in session when the user came in via Explore demo.
+  state.isDemoMode = false;
   if (user.displayName) state.user.name = user.displayName;
   try {
     await syncFirebaseData();
@@ -361,7 +431,12 @@ export async function enterAuthenticatedApp(user) {
     stopPendingAccessPolling();
   }
   startExpiryRefreshPolling();
-  renderAtTop();
+  // renderCurrentRoute, not renderAtTop: the route-level loaders (club core team, the admin
+  // tab data, the club-core membership applicants queue) only run there. Rendering directly
+  // on boot left a club core staring at an empty "Membership Applications" queue until they
+  // manually navigated away and back.
+  const { renderCurrentRoute } = await import('./router.js');
+  await renderCurrentRoute();
 }
 
 export function enterDemoApp() {
@@ -384,23 +459,99 @@ export function enterDemoApp() {
   renderAtTop();
 }
 
+/**
+ * Clear everything tied to the previous session.
+ *
+ * The old sign-out reset only a handful of fields, so signing in as a second user in the
+ * same tab rendered the first user's role, club accesses, saved items and campus feed until
+ * the next sync landed — including host-only controls for someone who is not a host.
+ */
+export function resetSessionState() {
+  state.authed = false;
+  state.authUser = null;
+  state.role = null;
+  state.isDemoMode = false;
+  state.dataLoaded = false;
+  state.dataLoading = false;
+  state.onboardingStep = "role";
+  state.route = "home";
+  state.user = { name: "", school: schools[0], year: "1", interests: [] };
+
+  state.host = {
+    type: "Club Core",
+    clubSlug: "",
+    selectedClubIds: [],
+    school: schools[0],
+    roleTitle: "Core Member",
+    name: "",
+    category: "",
+    description: "",
+    email: "",
+    joinLink: "",
+    approver: "Current president",
+    approvedBy: "Super Admin",
+    approved: false,
+    clubAccesses: [],
+    schoolAccesses: [],
+  };
+  state._hasClubCore = false;
+  state._hasSchoolRep = false;
+
+  replaceCollection(events, []);
+  replaceCollection(clubs, []);
+  replaceCollection(announcements, []);
+  replaceCollection(projects, []);
+
+  state.hostRequests = [];
+  state.moderationFlags = [];
+  state.allUsers = [];
+  state.allEvents = [];
+  state.allAnnouncements = [];
+  state.allClubs = [];
+  state.allSchools = [];
+  state.contentReviews = [];
+  state.savedItems = [];
+  state.followedClubs = [];
+  state.rsvps = [];
+  state.myApplications = [];
+  state.clubApplications = [];
+  state.clubApplicants = [];
+  state.clubCoreMembers = [];
+  state.siteSettings = [];
+  state.loadErrors = [];
+
+  // Memoisation flags — stale values here made the next session show the previous one's data.
+  state._clubApplicantsLoaded = false;
+  state._clubApplicantsLoading = false;
+  state._loadedClubCoreFor = null;
+  state._clubCoreMembersLoading = false;
+
+  // Close every overlay so nothing from the old session is left floating.
+  state.createEventOpen = false;
+  state.editEventOpen = false;
+  state.createAnnouncementOpen = false;
+  state.editAnnouncementOpen = false;
+  state.createProjectOpen = false;
+  state.editProfileOpen = false;
+  state.editClubOpen = false;
+  state.createOpen = false;
+  state.searchOpen = false;
+  state.searchQuery = "";
+  state.loginOpen = false;
+  state._clubApplyModalOpen = false;
+  state.selectedEventId = null;
+  state.selectedProjectId = null;
+  state.selectedAnnouncementId = null;
+  state.selectedClubSlug = null;
+}
+
 export async function handleSignOut() {
   if (!window.RVUFirebase) return;
   try {
     await window.RVUFirebase.signOut();
     stopPendingAccessPolling();
     stopExpiryRefreshPolling();
-    state.authed = false;
-    state.authUser = null;
-    state.role = null;
-    state.dataLoaded = false;
-    state.onboardingStep = "role";
-    state.route = "home";
-    state.user = { name: "", school: schools[0], year: "1", interests: [] };
-    state.allUsers = [];
-    state.allEvents = [];
-    state.allAnnouncements = [];
-    state.allClubs = [];
+    resetSessionState();
     renderAtTop();
   } catch (error) {
     window.alert(error.message || "Sign-out failed.");

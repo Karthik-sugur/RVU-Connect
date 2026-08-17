@@ -23,3 +23,7 @@ __pycache__/
 
 # Logs
 *.log
+# Firebase emulator artifacts
+firestore-debug.log
+ui-debug.log
+firebase-export-*/
