@@ -99,10 +99,25 @@ async function main() {
       email: RVU.email, role: "superAdmin",
     })));
 
-  await it("allows a normal student profile create", () =>
+  // The EXACT payload ensureUserProfile() writes (js/services.js). Keep these in sync — an
+  // over-broad create denylist here denies every new sign-up, and a fixture that omits a field
+  // the app really sends will not catch it.
+  await it("allows the real ensureUserProfile create payload", () =>
     assertSucceeds(setDoc(doc(asRvu, "users", RVU.sub), {
-      email: RVU.email, role: "student", name: "Student One",
-      interests: [], clubIds: [], onboardingComplete: false,
+      email: RVU.email,
+      name: "Student One",
+      role: "student",
+      clubIds: [],
+      roleTitle: "",
+      interests: [],
+      onboardingComplete: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })));
+
+  await it("allows a minimal student profile create", () =>
+    assertSucceeds(setDoc(doc(asRvu2, "users", RVU2.sub), {
+      email: RVU2.email, role: "student", name: "Student Two",
     })));
 
   await it("still rejects escalating schoolRepApproved via update", () =>

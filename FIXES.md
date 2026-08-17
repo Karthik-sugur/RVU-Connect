@@ -184,7 +184,38 @@ real records in production:
    relocated. A `try/catch` cannot catch it, because a missing field is not an error. The queues
    now page by document id and sort by date client-side via `sortByCreatedAtDesc()`. Same fix for
    the moderation-flag load.
-2. **A missing composite index.** `removeClubCoreRole`'s fallback queries `clubApplications` by
-   `clubId + email + status`, which had no index. Added to `firestore.indexes.json`.
+2. **An index definition worth adding** (though not, on closer inspection, a true gap).
+   `removeClubCoreRole`'s fallback queries `clubApplications` by `clubId + email + status`, which
+   had no matching definition. I first called this a missing index; it is not strictly required,
+   because Firestore only needs a composite index when a query combines equality with an `orderBy`
+   or range on a different field, and this query is equality-only. Added anyway — it is the correct
+   definition and costs nothing. Only two composite indexes are genuinely required
+   (`events` and `announcements` on `status + createdAt`), and both predate this branch.
 
 See [FIRESTORE-DEPLOY.md](FIRESTORE-DEPLOY.md) for the deploy steps and the lockout warning.
+
+---
+
+## Follow-up: a blocker I introduced, caught by the deploy audit
+
+Before deploying I ran a second multi-agent audit over the Firebase surfaces. It found a **release
+blocker in my own fix**, and it is the same class of mistake the original audit kept flagging.
+
+**The `users/{uid}` create rule denied every new sign-up.** My whitelist blocked `roleTitle`, but
+`ensureUserProfile` (`js/services.js:335`) writes `roleTitle: ""` on every first-time profile
+create. So the rule denied the create, `enterAuthenticatedApp` alerted "Missing or insufficient
+permissions", and no new account could ever get into the app. Existing accounts were unaffected —
+which is exactly why it would have survived testing with the current accounts and only broken for
+real students on rollout day.
+
+**Why the tests missed it:** `tests/firestore.rules.test.js` created a profile with a *hand-written*
+payload that happened to omit `roleTitle`. The fixture did not match what the app actually sends.
+The original audit's lesson — a passing demo is not a passing test — applied to my own test.
+
+Fixed by narrowing the denylist to the three genuinely privilege-bearing keys
+(`schoolRepApproved`, `clubCoreApproved`, `hostApproved`) and adding a test that asserts the
+**exact** `ensureUserProfile` payload, so the fixture can no longer drift from the code. 27/27 pass.
+
+Also corrected in [FIRESTORE-DEPLOY.md](FIRESTORE-DEPLOY.md): a deploy-time hazard worth knowing
+about — `firebase deploy` prompts to **delete** any composite index or single-field exemption that
+exists in the project but not in `firestore.indexes.json`. Answer no, and never pass `--force`.

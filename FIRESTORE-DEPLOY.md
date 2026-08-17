@@ -70,11 +70,15 @@ Validate locally first — this compiles the rules in the emulator and asserts t
 npm test
 ```
 
-Then deploy rules and indexes together:
+Then deploy rules and indexes together — **always with `--only`**:
 
 ```bash
 npx firebase deploy --only firestore:rules,firestore:indexes --project rvuconnect-26c39
 ```
+
+**Never run a bare `firebase deploy`.** `firebase.json` declares a functions codebase pointing at
+a `functions/` directory that does not exist in this repo. The CLI validates that during the
+prepare step, before releasing anything, so a bare deploy aborts the whole thing — rules included.
 
 Confirm afterwards:
 
@@ -94,29 +98,75 @@ reads **Enabled**; queries against a still-building index fail with `failed-prec
 | Rule | Before | After |
 |---|---|---|
 | `isRvuEmail()` | any authenticated account with an email | must end `@rvu.edu.in` |
-| `users/{uid}` create | only `role` and `email` constrained | also rejects `schoolRepApproved`, `clubCoreApproved`, `hostApproved`, `schoolScope`, `clubId`, `roleTitle` |
+| `users/{uid}` create | only `role` and `email` constrained | also rejects `schoolRepApproved`, `clubCoreApproved`, `hostApproved` — the three privilege-bearing keys only |
 | `clubs/{id}/coreMembers` read | own membership or fellow cores only | any RVU account (the roster is shown on every club page) |
 | `events/{id}/rsvps/{uid}` | owner + super admin | unchanged — owner + super admin |
 
 Everything else is untouched. The `hostRequests` self-approval block, the field-level `users`
 update guards and the closing default-deny are all as they were.
 
-### Indexes — one addition
+### Indexes — one addition, and a deploy prompt to say NO to
 
 ```json
 { "collectionGroup": "clubApplications",
   "fields": ["clubId", "email", "status"] }
 ```
 
-Needed by the `removeClubCoreRole` fallback, which looks up an approved application by email when
-the roster document has no `uid`. Every other query the code issues is already covered — audited
-query-by-query against `firestore.indexes.json`.
+**Correction to an earlier claim in this file:** I previously called this a *missing* index. It is
+not strictly required. Firestore only needs a composite index when a query combines an equality
+filter with an `orderBy` (or range) on a **different** field. This query is equality-only
+(`clubId ==`, `email ==`, `status ==`), and Firestore serves those by merging its automatic
+single-field indexes. The definition is still correct and deploys for free, so it is staying — but
+it was never the difference between working and broken.
 
-Two pre-existing indexes (`hostRequests: status,createdAt` and `users: role,createdAt`) are no
-longer used, because the admin queues now page by document id. Harmless; left in place, since
-deleting an index is itself a destructive change.
+Auditing every query in the codebase against that rule, exactly **two** composite indexes are
+genuinely required, and both already existed before this branch:
 
----
+| Index | Needed by |
+|---|---|
+| `events` — status Asc, createdAt Desc | the published events feed and its Load More |
+| `announcements` — status Asc, createdAt Desc | the published announcements feed and its Load More |
+
+If the feed renders in production today, those two are already Enabled and nothing new breaks.
+
+> ### ⚠️ Answer NO if the deploy offers to delete indexes
+>
+> `firebase-tools` 12.9.1 compares the project against `firestore.indexes.json` and **prompts to
+> delete anything present in the project but absent from the file** — including any composite index
+> someone created earlier by clicking a "create index" link in a Firestore error message.
+>
+> The repo file also has `"fieldOverrides": []`, so **any existing single-field index exemption or
+> TTL policy will be listed for deletion too.**
+>
+> Answer **no** to both prompts, and never pass `--force`. If something gets listed, add it to
+> `firestore.indexes.json` afterwards so the repo matches reality.
+
+Two pre-existing indexes are now unused, because the admin queues page by document id instead of
+ordering server-side: `hostRequests (status, createdAt)` and `users (role, createdAt)`. Harmless.
+Leave them — deleting an index is itself a destructive change.
+
+## Firebase Console checklist
+
+These are console changes, not deploys. Nothing in the repo can substitute for them.
+
+### Required
+
+| Check | Why | Where |
+|---|---|---|
+| **Authorized domains** include the production origin (`rvu-connect.vercel.app`, plus any preview URL you test on) | The Auth SDK rejects an unlisted serving origin client-side with `auth/unauthorized-domain`. Google sign-in fails for **everyone**, and there is no Firebase Hosting block in `firebase.json`, so the app is served from elsewhere. | Authentication → Settings → Authorized domains |
+| **Google is the only enabled sign-in provider** | The client only implements `signInWithPopup` + `GoogleAuthProvider` (`js/services.js:19-24`). Email/Password being enabled would let accounts exist that the app cannot sign in, and the rules assume an `email` claim is always present. | Authentication → Sign-in method |
+| **Decide the App Check enforcement state** | `js/firebase-init.js` initialises App Check unconditionally. With Firestore enforcement **on**, an unregistered or misconfigured reCAPTCHA v3 key blocks every request from both the app and the admin console. | App Check → APIs → Cloud Firestore |
+
+### Recommended
+
+- **reCAPTCHA v3 site key** — confirm `6Lec…H1pDo` (`js/config.js:15`) is the key registered for
+  this web app, and that its allowed-domains list covers the production origin.
+- **API key referrer restrictions** — if the browser key is restricted, the production origin must
+  be allowed (Google Cloud console, not Firebase).
+- **OAuth consent screen** — check its publishing status before a campus-wide rollout.
+- **App Check debug tokens** — `CONFIG.appCheck.debugToken` is the boolean `true`, which makes the
+  SDK mint and print a *random per-browser* UUID rather than use a fixed token. Any token you
+  register is a permanent bypass for whoever holds it, so register sparingly and delete stale ones.
 
 ## Data migration: none required
 
@@ -133,20 +183,21 @@ No document needs rewriting. Specifically:
   the public events/announcements feed (`where status == published` + `orderBy createdAt`), and
   `createEvent` / `createAnnouncement` have always written `createdAt`.
 
-### Two audits worth running once
+### Data checks worth running once
 
-Neither is required for the deploy to succeed — both are about data that may already be wrong.
+None of these block the deploy. Each is a "check, and only if X then do Y" — I have no access to
+your database, so these are framed as queries for you to run.
 
-**1. Non-RVU accounts that will lose access.** Firebase Console → Authentication → Users, sort by
-email. Anyone outside `@rvu.edu.in` stops being able to read anything the moment the rules land.
-Their documents are untouched, so access returns if you widen the rule later.
-
-**2. Unearned school-rep grants.** The escalation the audit found was open until now, so it is
-worth confirming nobody used it. In Firestore, query `users` where `schoolRepApproved == true` and
-check each one has a matching approved `hostRequests/schoolRepresentative_{uid}`. Any user with
-the flag but no approved request granted it to themselves — clear the flag.
-
----
+| Check | If you find it | Why it matters |
+|---|---|---|
+| `users` where `schoolRepApproved == true` | Cross-check each against an **approved** `hostRequests/schoolRepresentative_{uid}`. Any user with the flag but no approved request granted it to themselves — clear the flag. | The escalation was open until this branch. `isApprovedSchoolRep()` trusts that flag, so a self-granted one is live campus-wide publishing access. |
+| `clubApplications` where `status == "approved"` | Confirm each has a matching `clubs/{clubId}/coreMembers/{email}` document. | The self-heal paths **recreate** membership from an approved application. Anyone removed from a roster before this branch comes back the first time someone opens that club page. Demote the application to `revoked` instead. |
+| `clubs/{clubId}/coreMembers` docs with no `status` field | Set `status: "approved"`. | The client treats a missing status as approved and shows core tools, but `isApprovedClubCore()` in the rules requires `status == 'approved'` — so every write is denied. Broken-looking host account. |
+| `coreMembers` doc ids that are not the lowercased email | Recreate the document under the lowercased email id. | `removeClubCoreRole` deletes by lowercased email, so a differently-cased id cannot be removed. |
+| `clubs` docs whose `status` is not exactly `"approved"` | Set it. | The rules gate club reads on that exact value, so the club is invisible campus-wide. |
+| `siteSettings/platform` → `bannedWords` | Must be an **array**, not a comma-separated string. `reviewRequired` must be a boolean. | Both are now genuinely enforced (`assertNoBannedWords`, `resolvePublishStatus`). A string would be iterated character-by-character. If the document is missing entirely the code defaults safely to no banned words and no review. |
+| Auth users outside `@rvu.edu.in` | Expect them to lose all access. | Their documents are untouched and access returns if you widen the rule later. Note subdomains (`x@cs.rvu.edu.in`) do **not** match. |
+| `superAdmins` entries for non-RVU accounts | Delete them and set the role back to `student`. | Dead once the domain gate lands, but a stale grant. |
 
 ## Not deployed from here
 
