@@ -199,11 +199,29 @@ export function unique(values) {
   return [...new Set(values)];
 }
 
+/**
+ * Escape for text AND attribute contexts. Quotes must be escaped — this is interpolated into
+ * double-quoted attributes everywhere, and leaving them intact allows attribute breakout.
+ *
+ * Keep self-contained: this module is in an import cycle, so escapeHtml can run before the
+ * module body finishes. A module-level lookup table here throws at boot. Do not refactor.
+ */
 export function escapeHtml(str) {
   if (typeof str !== "string") return str == null ? "" : String(str);
-  const div = document.createElement("div");
-  div.textContent = str;
-  return div.innerHTML;
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/** Allow only http(s) URLs through into href/src, so javascript:/data: cannot execute. */
+export function safeUrl(value) {
+  const raw = String(value == null ? "" : value).trim();
+  if (!raw) return "";
+  if (!/^https?:\/\//i.test(raw)) return "";
+  return escapeHtml(raw);
 }
 
 export function validateClubDraft() {
