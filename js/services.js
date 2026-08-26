@@ -21,6 +21,10 @@ async function requireRvuUser(user) {
 // popup's sessionStorage back. Redirect is the supported path there, and it only works
 // because /__/auth is proxied onto our own origin (see vercel.json).
 function prefersRedirectSignIn() {
+  // Redirect is only an improvement when the handler is first-party. Against a
+  // third-party authDomain it is the storage-partitioning failure we set out to fix,
+  // so fall back to the popup until same-origin auth is switched on in config.
+  if (auth.config?.authDomain !== window.location.hostname) return false;
   return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
     || (navigator.maxTouchPoints > 1 && /Macintosh/i.test(navigator.userAgent));
 }
