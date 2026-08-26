@@ -1075,7 +1075,14 @@ export function renderCreateProjectModal() {
 export function renderProjects() {
   if (state.selectedProjectId) return renderProjectDetail();
   const tags = unique(projects.flatMap((project) => project.tags || []));
-  const filtered = projects.filter((project) => state.filters.projectTag === "All" || (project.tags || []).includes(state.filters.projectTag));
+  const tagOptions = ["All", ...tags];
+  const statusOptions = ["All", "Open", "Closed"];
+  const selectedTag = tagOptions.includes(state.filters.projectTag) ? state.filters.projectTag : "All";
+  const selectedStatus = statusOptions.includes(state.filters.projectStatus) ? state.filters.projectStatus : "All";
+  const filtered = projects.filter((project) =>
+    (selectedTag === "All" || (project.tags || []).includes(selectedTag))
+    && (selectedStatus === "All" || String(project.status || "").toLowerCase() === selectedStatus.toLowerCase())
+  );
   return `
     <section class="page-head" style="display:flex;justify-content:space-between;align-items:flex-start;gap:20px;">
       <div>
@@ -1086,8 +1093,8 @@ export function renderProjects() {
       ${state.authed ? `<button style="background:#D7AC54;color:#1a1a1a;border:none;padding:10px 16px;font-size:12px;font-weight:700;font-family:'Inter',sans-serif;letter-spacing:0.05em;cursor:pointer;text-transform:uppercase;flex-shrink:0;margin-top:10px;border-radius:0;" data-action="open-create-project">New Project</button>` : ""}
     </section>
     <div class="filters">
-      ${selectField("projectTag", "Tag", ["All", ...tags], state.filters.projectTag)}
-      ${selectField("status", "Status", ["All", "Open", "Closed"], "All")}
+      ${selectField("projectTag", "Tag", tagOptions, selectedTag)}
+      ${selectField("projectStatus", "Status", statusOptions, selectedStatus)}
     </div>
     ${filtered.length ? `<div class="grid project-grid">${filtered.map(renderProjectCard).join("")}</div>` : renderEmptyState("No projects yet", "Verified users can create project posts in Firestore.")}
     <div style="text-align:center; margin-top: 30px;"><button class="btn secondary" data-action="load-more" data-collection="projects">Load More</button></div>

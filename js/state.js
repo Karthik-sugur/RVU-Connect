@@ -109,6 +109,7 @@ export const state = {
     announcementType: "All",
     announcementTag: "All",
     projectTag: "All",
+    projectStatus: "All",
   },
   allUsers: [],
   allEvents: [],
