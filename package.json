@@ -8,7 +8,7 @@
   },
   "scripts": {
     "test": "npm run lint && npm run test:rules",
-    "lint": "node --experimental-vm-modules scripts/check-syntax.mjs js/*.js admin.js sample-data.js",
+    "lint": "node --experimental-vm-modules scripts/check-syntax.mjs js/*.js admin.js sample-data.js && node scripts/check-import-map.mjs",
     "test:rules": "firebase emulators:exec --only firestore --project rvu-connect-rules-test \"node tests/firestore.rules.test.js\""
   },
   "repository": {

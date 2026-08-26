@@ -8,11 +8,39 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Instrument+Serif:ital@0;1&family=Syne:wght@400;500;700;800&family=Syne+Mono&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="./admin.css?v=20260519-demo-seed1" />
+    <link rel="stylesheet" href="./admin.css?v=20260826-1" />
   </head>
   <body>
     <div id="admin-app"></div>
-    <script type="module" src="./js/services.js?v=20260629-cachebust"></script>
-    <script type="module" src="./admin.js?v=20260629-cachebust"></script>
+    <!-- Bump the ?v= token below on every release; it versions the whole module graph.
+         Relative keys keep this correct under any base path. Without the map only the
+         entry scripts are versioned, so a host that caches without revalidating can pair
+         a fresh main.js with a stale ui.js. Add new modules here too. -->
+    <script type="importmap">
+      {
+        "imports": {
+          "./js/auth.js": "./js/auth.js?v=20260826-1",
+          "./js/config.js": "./js/config.js?v=20260826-1",
+          "./js/constants.js": "./js/constants.js?v=20260826-1",
+          "./js/dialogs.js": "./js/dialogs.js?v=20260826-1",
+          "./js/errors.js": "./js/errors.js?v=20260826-1",
+          "./js/firebase-init.js": "./js/firebase-init.js?v=20260826-1",
+          "./js/logger.js": "./js/logger.js?v=20260826-1",
+          "./js/main.js": "./js/main.js?v=20260826-1",
+          "./js/render-admin.js": "./js/render-admin.js?v=20260826-1",
+          "./js/repository.js": "./js/repository.js?v=20260826-1",
+          "./js/router.js": "./js/router.js?v=20260826-1",
+          "./js/services.js": "./js/services.js?v=20260826-1",
+          "./js/state.js": "./js/state.js?v=20260826-1",
+          "./js/toast.js": "./js/toast.js?v=20260826-1",
+          "./js/ui.js": "./js/ui.js?v=20260826-1",
+          "./js/utils.js": "./js/utils.js?v=20260826-1",
+          "./js/validation.js": "./js/validation.js?v=20260826-1",
+          "./sample-data.js": "./sample-data.js?v=20260826-1"
+        }
+      }
+    </script>
+    <script type="module" src="./js/services.js?v=20260826-1"></script>
+    <script type="module" src="./admin.js?v=20260826-1"></script>
   </body>
 </html>
