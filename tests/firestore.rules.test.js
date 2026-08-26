@@ -16,7 +16,7 @@ const {
   assertFails,
   assertSucceeds,
 } = require("@firebase/rules-unit-testing");
-const { doc, getDoc, setDoc, updateDoc, deleteDoc, collection, getDocs } = require("firebase/firestore");
+const { doc, getDoc, setDoc, updateDoc, deleteDoc, collection, getDocs, query, where, limit } = require("firebase/firestore");
 
 const RULES = fs.readFileSync(path.join(__dirname, "..", "firestore.rules"), "utf8");
 const PROJECT_ID = "rvu-connect-rules-test";
@@ -209,6 +209,69 @@ async function main() {
     assertFails(setDoc(doc(asRvu2, "hostRequests", `clubCore_${RVU2.sub}`), {
       uid: RVU2.sub, status: "approved", type: "clubCore",
     })));
+
+  console.log("\nclubApplications — the three permission failures from the QA screenshots");
+
+  await it("lets a first-time applicant read the not-yet-created application doc", () =>
+    assertSucceeds(getDoc(doc(asRvu2, "clubApplications", `club-a_${RVU2.sub}`))));
+
+  await it("still hides another student's application from a non-core student", async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "clubApplications", `club-a_${RVU.sub}`), {
+        uid: RVU.sub, email: RVU.email, clubId: "club-a", status: "pending",
+      });
+    });
+    await assertFails(getDoc(doc(asRvu2, "clubApplications", `club-a_${RVU.sub}`)));
+  });
+
+  await it("lets a core member whose roster doc has no status field list applicants", async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await setDoc(doc(db, "clubs", "club-b"), { name: "Legacy Club", status: "approved" });
+      await setDoc(doc(db, "clubs", "club-b", "coreMembers", CORE.email), {
+        email: CORE.email, uid: CORE.sub, role: "core",
+      });
+      await setDoc(doc(db, "clubApplications", `club-b_${RVU.sub}`), {
+        uid: RVU.sub, email: RVU.email, clubId: "club-b", status: "pending",
+      });
+    });
+    await assertSucceeds(getDocs(query(
+      collection(asCore, "clubApplications"),
+      where("clubId", "==", "club-b"),
+      where("status", "==", "pending"),
+      limit(50),
+    )));
+  });
+
+  await it("still blocks an unrelated student from listing a club's applicants", () =>
+    assertFails(getDocs(query(
+      collection(asRvu2, "clubApplications"),
+      where("clubId", "==", "club-b"),
+      where("status", "==", "pending"),
+      limit(50),
+    ))));
+
+  await it("lets a member withdraw their own approved application when leaving a club", async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "clubApplications", `club-a_${RVU2.sub}`), {
+        uid: RVU2.sub, email: RVU2.email, clubId: "club-a", status: "approved",
+      });
+    });
+    await assertSucceeds(updateDoc(doc(asRvu2, "clubApplications", `club-a_${RVU2.sub}`), {
+      uid: RVU2.sub, email: RVU2.email, clubId: "club-a", status: "withdrawn",
+    }));
+  });
+
+  await it("still blocks a student from self-approving their own application", async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "clubApplications", `club-a_${RVU2.sub}`), {
+        uid: RVU2.sub, email: RVU2.email, clubId: "club-a", status: "pending",
+      });
+    });
+    await assertFails(updateDoc(doc(asRvu2, "clubApplications", `club-a_${RVU2.sub}`), {
+      uid: RVU2.sub, email: RVU2.email, clubId: "club-a", status: "approved",
+    }));
+  });
 
   await testEnv.cleanup();
 

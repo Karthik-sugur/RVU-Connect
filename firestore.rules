@@ -6,8 +6,6 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // The single server-side gate on the whole dataset. Without the domain check, any
-    // Google account can read every club, event, announcement and project.
     function isRvuEmail() {
       return signedIn()
         && request.auth.token.email is string
@@ -26,21 +24,19 @@ service cloud.firestore {
     }
 
     function authEmailKey() {
-      // Document ids for coreMembers are stored lowercased by the client.
       return request.auth.token.email.lower();
+    }
+
+    function coreMemberApproved(clubId, memberKey) {
+      return exists(/databases/$(database)/documents/clubs/$(clubId)/coreMembers/$(memberKey))
+        && get(/databases/$(database)/documents/clubs/$(clubId)/coreMembers/$(memberKey)).data.get('status', 'approved') == 'approved';
     }
 
     function isApprovedClubCore(clubId) {
       return isRvuEmail()
         && (
-          (
-            exists(/databases/$(database)/documents/clubs/$(clubId)/coreMembers/$(authEmailKey()))
-            && get(/databases/$(database)/documents/clubs/$(clubId)/coreMembers/$(authEmailKey())).data.status == 'approved'
-          )
-          || (
-            exists(/databases/$(database)/documents/clubs/$(clubId)/coreMembers/$(request.auth.token.email))
-            && get(/databases/$(database)/documents/clubs/$(clubId)/coreMembers/$(request.auth.token.email)).data.status == 'approved'
-          )
+          coreMemberApproved(clubId, authEmailKey())
+          || coreMemberApproved(clubId, request.auth.token.email)
         );
     }
 
@@ -69,7 +65,6 @@ service cloud.firestore {
         );
     }
 
-    // Deterministic application id: {clubId}_{uid}
     function hasApprovedClubApplication(clubId) {
       return exists(/databases/$(database)/documents/clubApplications/$(clubId + '_' + request.auth.uid))
         && get(/databases/$(database)/documents/clubApplications/$(clubId + '_' + request.auth.uid)).data.status == 'approved'
@@ -89,11 +84,8 @@ service cloud.firestore {
     }
 
     match /users/{uid} {
-      // Privilege fields must never appear on a self-created profile — isApprovedSchoolRep()
-      // trusts schoolRepApproved, so allowing it here is a student -> school-rep escalation.
-      // Block ONLY the privilege-bearing keys: ensureUserProfile legitimately writes name,
-      // role, email, clubIds, roleTitle, interests, onboardingComplete and the timestamps, and
-      // blocking any of those denies every new sign-up.
+      // schoolRepApproved, clubCoreApproved and hostApproved are privilege grants that
+      // isApprovedSchoolRep() trusts, so a self-created profile must never carry them.
       allow create: if isRvuEmail()
         && createsOwnDoc(uid)
         && request.resource.data.role == 'student'
@@ -114,8 +106,6 @@ service cloud.firestore {
           && unchanged('schoolRepApproved')
           && unchanged('clubCoreApproved')
         )
-        // Self-heal sticky school-rep flag when the canonical approved host request already exists.
-        // Lets dual-role users recover without running Repair every time.
         || (
           isRvuEmail()
           && createsOwnDoc(uid)
@@ -172,14 +162,10 @@ service cloud.firestore {
       allow update: if isSuperAdmin() || (isApprovedClubCore(clubId) && unchanged('createdAt') && unchanged('createdBy'));
 
       match /coreMembers/{memberEmail} {
-        // Shown on every club page, so any RVU account may read it. The club document already
-        // exposes founder/president/advisor names and emails.
         allow read: if isSuperAdmin()
           || isRvuEmail()
           || isApprovedClubCore(clubId);
 
-        // Super admin / approved core / founder can manage the roster.
-        // Applicant can self-heal their own approved membership when the deterministic application exists.
         allow create, update: if isSuperAdmin()
           || isApprovedClubCore(clubId)
           || isClubFounder(clubId)
@@ -199,7 +185,6 @@ service cloud.firestore {
     }
 
     match /clubApplications/{applicationId} {
-      // Students create their own pending app; cores/founders may create an approved mirror while approving.
       allow create: if isRvuEmail()
         && (
           (
@@ -215,8 +200,19 @@ service cloud.firestore {
           )
         );
 
-      allow read: if isSuperAdmin()
-        || (isRvuEmail() && resource.data.uid == request.auth.uid)
+      // resource is null when the document does not exist. Without this branch every
+      // first-time applicant is denied on the existence check that precedes the write.
+      allow get: if isRvuEmail()
+        && (
+          resource == null
+          || resource.data.uid == request.auth.uid
+          || isSuperAdmin()
+          || isApprovedClubCore(resource.data.clubId)
+          || isClubFounder(resource.data.clubId)
+        );
+
+      allow list: if (isRvuEmail() && resource.data.uid == request.auth.uid)
+        || isSuperAdmin()
         || isApprovedClubCore(resource.data.clubId)
         || isClubFounder(resource.data.clubId);
 
@@ -225,7 +221,7 @@ service cloud.firestore {
             && resource.data.uid == request.auth.uid
             && request.resource.data.uid == request.auth.uid
             && (
-              (request.resource.data.status == 'withdrawn' && resource.data.status == 'pending')
+              (request.resource.data.status == 'withdrawn' && resource.data.status in ['pending', 'approved'])
               || (request.resource.data.status == 'pending' && resource.data.status in ['rejected', 'withdrawn'])
             )
             && request.resource.data.email is string
@@ -250,13 +246,11 @@ service cloud.firestore {
       allow update: if isSuperAdmin()
         || (resource.data.hostType == 'club' && isApprovedClubCore(resource.data.clubId) && unchanged('createdAt'))
         || (resource.data.hostType == 'school' && isApprovedSchoolRep() && unchanged('createdAt'));
-        
+
       allow delete: if isSuperAdmin()
         || (resource.data.hostType == 'club' && isApprovedClubCore(resource.data.clubId))
         || (resource.data.hostType == 'school' && isApprovedSchoolRep());
 
-      // Unused by the app — attendance is off-platform via the event's Join link. Kept
-      // owner-only so any pre-existing data stays reachable by whoever wrote it.
       match /rsvps/{uid} {
         allow read: if isSuperAdmin() || createsOwnDoc(uid);
         allow create, update, delete: if isRvuEmail() && createsOwnDoc(uid);
@@ -276,7 +270,7 @@ service cloud.firestore {
       allow update: if isSuperAdmin()
         || (resource.data.sourceType == 'club' && isApprovedClubCore(resource.data.clubId) && unchanged('createdAt'))
         || (resource.data.sourceType == 'school' && isApprovedSchoolRep() && unchanged('createdAt'));
-        
+
       allow delete: if isSuperAdmin()
         || (resource.data.sourceType == 'club' && isApprovedClubCore(resource.data.clubId))
         || (resource.data.sourceType == 'school' && isApprovedSchoolRep());
@@ -291,7 +285,7 @@ service cloud.firestore {
 
       allow update: if isSuperAdmin()
         || (isRvuEmail() && resource.data.ownerId == request.auth.uid && unchanged('ownerId') && unchanged('createdAt'));
-        
+
       allow delete: if isSuperAdmin()
         || (isRvuEmail() && resource.data.ownerId == request.auth.uid);
     }
@@ -302,8 +296,10 @@ service cloud.firestore {
         && request.resource.data.status == 'pending'
         && request.resource.data.type in ['clubCore', 'schoolRepresentative', 'newClub'];
 
-      // Own requests or super admin. School-rep approval is super-admin only.
-      allow read: if isSuperAdmin()
+      allow get: if isSuperAdmin()
+        || (isRvuEmail() && (resource == null || resource.data.uid == request.auth.uid));
+
+      allow list: if isSuperAdmin()
         || (isRvuEmail() && resource.data.uid == request.auth.uid);
 
       allow update: if isSuperAdmin()
