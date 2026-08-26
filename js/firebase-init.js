@@ -37,10 +37,17 @@ if (shouldUseAppCheckDebugToken(window.location.hostname)) {
   self.FIREBASE_APPCHECK_DEBUG_TOKEN = CONFIG.appCheck.debugToken;
 }
 
-export const appCheck = initializeAppCheck(app, {
-  provider: new ReCaptchaV3Provider(CONFIG.appCheck.reCaptchaKey),
-  isTokenAutoRefreshEnabled: true
-});
+// Every module in the app imports from this file, so a throw here blanks the whole site.
+// App Check attestation is allowed to fail; it must never take the app down with it.
+export let appCheck = null;
+try {
+  appCheck = initializeAppCheck(app, {
+    provider: new ReCaptchaV3Provider(CONFIG.appCheck.reCaptchaKey),
+    isTokenAutoRefreshEnabled: true
+  });
+} catch (error) {
+  console.warn("[RVU] App Check unavailable, continuing without attestation", error);
+}
 
 // Explicit persistence order: IndexedDB first, localStorage where IndexedDB is blocked
 // (iOS private browsing). Without this a returning user is asked to sign in again.

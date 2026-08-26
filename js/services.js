@@ -1,6 +1,6 @@
 import { app, auth, db, analytics } from "./firebase-init.js";
 import { getDoc, getDocs, setDoc, updateDoc, deleteDoc, deleteField, doc, collection, query, where, orderBy, limit, startAfter, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
-import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
+import { onAuthStateChanged, signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, signOut } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import { handleFirebaseError } from "./errors.js";
 import { EMAIL_DOMAIN } from "./constants.js";
 
@@ -17,9 +17,22 @@ async function requireRvuUser(user) {
   return user;
 }
 
+// Mobile browsers block or orphan the OAuth popup, and iOS Safari cannot read the
+// popup's sessionStorage back. Redirect is the supported path there, and it only works
+// because /__/auth is proxied onto our own origin (see vercel.json).
+function prefersRedirectSignIn() {
+  return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+    || (navigator.maxTouchPoints > 1 && /Macintosh/i.test(navigator.userAgent));
+}
+
 async function signInWithGoogle() {
   const provider = new GoogleAuthProvider();
   provider.setCustomParameters({ hd: "rvu.edu.in", prompt: "select_account" });
+  if (prefersRedirectSignIn()) {
+    await signInWithRedirect(auth, provider);
+    // The page navigates away here. The return leg lands in getRedirectResult below.
+    return null;
+  }
   const result = await signInWithPopup(auth, provider);
   return requireRvuUser(result.user);
 }
@@ -30,12 +43,30 @@ let markAuthReady;
 const authReady = new Promise((resolve) => { markAuthReady = resolve; });
 let authSettled = false;
 
+// Single choke point for the domain gate. The popup path checks it too, but the redirect
+// path and any restored session arrive here only, so enforcing it anywhere else leaks.
 onAuthStateChanged(auth, (user) => {
+  if (user && !isRvuEmail(user.email)) {
+    signOut(auth).catch(() => {});
+    window.dispatchEvent(new CustomEvent("rvu-auth-error", { detail: "Only @rvu.edu.in accounts can use RVU Connect." }));
+    if (!authSettled) {
+      authSettled = true;
+      markAuthReady(null);
+    }
+    window.dispatchEvent(new CustomEvent("rvu-auth-user", { detail: null }));
+    return;
+  }
   if (!authSettled) {
     authSettled = true;
     markAuthReady(user || null);
   }
   window.dispatchEvent(new CustomEvent("rvu-auth-user", { detail: user }));
+});
+
+// Completes the mobile redirect leg. onAuthStateChanged still drives entry, so this only
+// has to surface the failure reason the user would otherwise never see.
+getRedirectResult(auth).catch((error) => {
+  window.dispatchEvent(new CustomEvent("rvu-auth-error", { detail: error?.message || "Sign-in could not be completed." }));
 });
 
 function rows(snapshot) {

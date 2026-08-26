@@ -437,6 +437,8 @@ export async function startFirebaseLogin() {
 
   try {
     const user = await window.RVUFirebase.signInWithGoogle();
+    // Null means the mobile redirect is in flight and the page is navigating away.
+    if (!user) return;
     await enterAuthenticatedApp(user);
     state.loginOpen = false;
   } catch (error) {
