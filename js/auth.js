@@ -335,12 +335,31 @@ export function hydrateCampusState(data) {
   state.clubApplications = data.clubApplications || [];
 }
 
+let enterInFlight = null;
+let enteredUid = null;
+
 export async function enterAuthenticatedApp(user) {
   if (!user) {
     window.alert("Authentication required. Please sign in with your RVU email.");
     return;
   }
+  // onAuthStateChanged, the bindEvents listener and startFirebaseLogin can all land on the
+  // same sign-in. Without this guard the whole campus load ran two or three times over.
+  if (enteredUid === user.uid && state.authed && state.dataLoaded) return;
+  if (enterInFlight) return enterInFlight;
+  enterInFlight = enterAuthenticatedAppInner(user);
+  try {
+    await enterInFlight;
+    enteredUid = user.uid;
+  } finally {
+    enterInFlight = null;
+  }
+}
+
+async function enterAuthenticatedAppInner(user) {
   state.authed = true;
+  state.authResolved = true;
+  state.isDemoMode = false;
   state.authUser = user;
   if (user.displayName) state.user.name = user.displayName;
   try {
@@ -388,9 +407,12 @@ export async function handleSignOut() {
   if (!window.RVUFirebase) return;
   try {
     await window.RVUFirebase.signOut();
+    enteredUid = null;
     stopPendingAccessPolling();
     stopExpiryRefreshPolling();
     state.authed = false;
+    state.authResolved = true;
+    state.isDemoMode = false;
     state.authUser = null;
     state.role = null;
     state.dataLoaded = false;

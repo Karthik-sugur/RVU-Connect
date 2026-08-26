@@ -33,6 +33,8 @@ export const projects = [];
 
 export const state = {
   createProjectOpen: false,
+  editProjectOpen: false,
+  editProjectId: null,
   createEventOpen: false,
   editEventId: null,
   editEventOpen: false,
@@ -47,6 +49,7 @@ export const state = {
   searchQuery: "",
   route: new URLSearchParams(window.location.search).get("route") || "home",
   authed: false,
+  authResolved: false,
   isDemoMode: false,
   dataLoaded: false,
   dataLoading: false,
@@ -99,9 +102,12 @@ export const state = {
   },
   filters: {
     eventType: "All",
+    eventClub: "All",
+    eventDate: "All upcoming",
     clubCategory: "All",
     clubSchool: "All",
     announcementType: "All",
+    announcementTag: "All",
     projectTag: "All",
   },
   allUsers: [],
@@ -112,19 +118,20 @@ export const state = {
   savedItems: [],
   followedClubs: [],
   rsvps: [],
+  myApplications: [],
+  contentReviews: [],
   siteSettings: [],
-  // Club Core applications (student's own)
   clubApplications: [],
-  // Pending applicants for the active club (club-core view)
   clubApplicants: [],
   _clubApplicantsLoaded: false,
-  // Modal flags
   _clubApplyModalOpen: false,
   editClubOpen: false,
   editClubId: null,
   clubCoreMembers: [],
   _clubCoreMembersLoading: false,
-  editClubId: null,
+  managedClubMembers: {},
+  _managedClubMembersLoaded: false,
+  _managedClubMembersLoading: false,
 };
 
 export const app = document.querySelector("#app");

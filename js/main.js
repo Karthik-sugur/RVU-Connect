@@ -5,7 +5,7 @@ import { validateEvent, validateAnnouncement, validateProject } from "./validati
 import { promptUser, validateClubDraft, replaceCollection } from './utils.js';
 import { schools, interests, events, clubs, announcements, projects, state, defaultClubDraft, app } from './state.js';
 import { isClubCore, isSchoolRep, isSuperAdmin, canHost, canManageClub, canManageEvent, activeClub, isAllowedRvuEmail, syncFirebaseData, softRefreshCampusData, startPendingAccessPolling, enterAuthenticatedApp, enterDemoApp, handleSignOut, startFirebaseLogin } from './auth.js';
-import { render, renderAtTop, renderSearchResultsHtml } from './ui.js';
+import { render, renderAtTop, renderSearchResultsHtml, isProjectOwner } from './ui.js';
 import { navigate, initRouter } from './router.js';
 
 export function bindEvents() {
@@ -209,7 +209,6 @@ export async function updateClubLeadershipFromPrompt(clubId, club = {}) {
     name: facultyAdvisorName || facultyAdvisorEmail,
     role: "facultyAdvisor",
   });
-  /* removed syncFirebaseData */
 }
 
 export async function handleAction(action, dataset) {
@@ -377,20 +376,9 @@ export async function handleAction(action, dataset) {
     return;
   }
   if (action === "open-club") {
+    // renderCurrentRoute() loads the roster behind _loadedClubCoreFor. Fetching it here too
+    // raced that load and blanked the list depending on which request landed last.
     navigate("clubs", { clubSlug: dataset.club });
-    if (window.RVUFirebase && dataset.club) {
-      state._clubCoreMembersLoading = true;
-      state.clubCoreMembers = [];
-      window.RVUFirebase.listClubCoreMembers(dataset.club).then((members) => {
-        state.clubCoreMembers = members || [];
-        state._clubCoreMembersLoading = false;
-        renderAtTop();
-      }).catch(() => {
-        state.clubCoreMembers = [];
-        state._clubCoreMembersLoading = false;
-        renderAtTop();
-      });
-    }
   }
   if (action === "back-to-clubs") {
     state.selectedClubSlug = null;
@@ -489,7 +477,6 @@ export async function handleAction(action, dataset) {
     });
     state.clubDraft = defaultClubDraft();
     state.adminTab = "clubs";
-    /* removed syncFirebaseData */
     navigate("admin");
     return;
   }
@@ -507,7 +494,6 @@ export async function handleAction(action, dataset) {
       description,
       leadEmail,
     });
-    /* removed syncFirebaseData */
   }
   if (action === "admin-delete-school") {
     if (!window.RVUFirebase || !isSuperAdmin() || !dataset.docid) return;
@@ -522,7 +508,6 @@ export async function handleAction(action, dataset) {
     const name = await promptUser("Core member name") || email;
     const role = await promptUser("Core role (e.g. designLead, eventsLead, treasurer)") || "core";
     await window.RVUFirebase.assignClubCoreRole(dataset.docid, { email, name, role });
-    /* removed syncFirebaseData */
   }
   if (action === "admin-update-club-leadership") {
     if (!window.RVUFirebase || !isSuperAdmin() || !dataset.docid) return;
@@ -541,7 +526,6 @@ export async function handleAction(action, dataset) {
     const name = await promptUser("Core member name") || email;
     const role = await promptUser("Core role (e.g. eventsLead, designLead, treasurer)") || "core";
     await window.RVUFirebase.assignClubCoreRole(dataset.docid, { email, name, role });
-    /* removed syncFirebaseData */
   }
   if (action === "admin-remove-core") {
     if (!window.RVUFirebase || !isSuperAdmin() || !dataset.docid) return;
@@ -549,7 +533,6 @@ export async function handleAction(action, dataset) {
     if (!email) return;
     if (!window.confirm(`Remove ${email} from this club core?`)) return;
     await window.RVUFirebase.removeClubCoreRole(dataset.docid, email);
-    /* removed syncFirebaseData */
   }
   if (action === "club-remove-core" || action === "remove-club-core-member") {
     if (!window.RVUFirebase || !dataset.docid && !dataset.club) return;
@@ -569,7 +552,15 @@ export async function handleAction(action, dataset) {
     if (!window.confirm(`Remove ${dataset.name || email} from this club core?`)) return;
     try {
       await window.RVUFirebase.removeClubCoreRole(clubId, email);
-      state.clubCoreMembers = (state.clubCoreMembers || []).filter((m) => (m.email || m.id || "").toLowerCase() !== email.trim().toLowerCase());
+      const removedEmail = email.trim().toLowerCase();
+      state.clubCoreMembers = (state.clubCoreMembers || []).filter((m) => (m.email || m.id || "").toLowerCase() !== removedEmail);
+      const roster = state.managedClubMembers?.[clubId];
+      if (roster) {
+        state.managedClubMembers = {
+          ...state.managedClubMembers,
+          [clubId]: roster.filter((m) => (m.email || m.id || "").toLowerCase() !== removedEmail),
+        };
+      }
       renderAtTop();
       window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Core member removed.", type: "info" } }));
     } catch (e) {
@@ -668,6 +659,64 @@ export async function handleAction(action, dataset) {
     projects.unshift(newProj);
     state.createProjectOpen = false;
     renderAtTop();
+    return;
+  }
+  if (action === "open-edit-project") {
+    const project = projects.find((item) => item.id === dataset.docid);
+    if (!project) return;
+    if (!isProjectOwner(project) && !isSuperAdmin()) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Only the person who posted this project can edit it.", type: "error" } }));
+      return;
+    }
+    state.editProjectOpen = true;
+    state.editProjectId = project.id;
+    render();
+    return;
+  }
+  if (action === "close-edit-project") {
+    state.editProjectOpen = false;
+    state.editProjectId = null;
+    render();
+    return;
+  }
+  if (action === "submit-edit-project") {
+    if (!window.RVUFirebase || !dataset.docid) return;
+    const project = projects.find((item) => item.id === dataset.docid);
+    if (!project) return;
+    if (!isProjectOwner(project) && !isSuperAdmin()) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Only the person who posted this project can edit it.", type: "error" } }));
+      return;
+    }
+    const title = document.getElementById("ep-title")?.value?.trim();
+    const description = document.getElementById("ep-description")?.value?.trim();
+    if (!title || !description) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Title and description are required.", type: "info" } }));
+      return;
+    }
+    const applicationLink = document.getElementById("ep-applink")?.value?.trim() || "";
+    if (applicationLink && !/^https?:\/\//.test(applicationLink)) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "External application link must start with http:// or https://", type: "info" } }));
+      return;
+    }
+    const updates = {
+      title,
+      description,
+      skills: (document.getElementById("ep-skills")?.value || "").split(",").map((s) => s.trim()).filter(Boolean),
+      tags: (document.getElementById("ep-tags")?.value || "").split(",").map((t) => t.trim()).filter(Boolean),
+      expiry: document.getElementById("ep-expiry")?.value || "",
+      contactPhone: document.getElementById("ep-phone")?.value?.trim() || "",
+      applicationLink: applicationLink || null,
+    };
+    try {
+      await window.RVUFirebase.updateProject(dataset.docid, updates);
+      Object.assign(project, updates);
+      state.editProjectOpen = false;
+      state.editProjectId = null;
+      renderAtTop();
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Project updated.", type: "info" } }));
+    } catch (e) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: e.message || "Could not update project.", type: "error" } }));
+    }
     return;
   }
   if (action === "close-create-event") {
@@ -1426,6 +1475,26 @@ export async function handleAction(action, dataset) {
   }
 
 
+  if (action === "load-club-rosters") {
+    if (!window.RVUFirebase) return;
+    const clubIds = (state.host.clubAccesses || []).map((access) => access.club?.id || access.club?.slug).filter(Boolean);
+    if (!clubIds.length) return;
+    try {
+      state._managedClubMembersLoading = true;
+      renderAtTop();
+      const rosters = await Promise.all(clubIds.map((clubId) => window.RVUFirebase.listClubCoreMembers(clubId).catch(() => [])));
+      const byClub = {};
+      clubIds.forEach((clubId, index) => { byClub[clubId] = rosters[index] || []; });
+      state.managedClubMembers = byClub;
+      state._managedClubMembersLoaded = true;
+    } catch (e) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: e.message || "Failed to load core team.", type: "error" } }));
+    } finally {
+      state._managedClubMembersLoading = false;
+      renderAtTop();
+    }
+    return;
+  }
   if (action === "load-club-applicants") {
     if (!window.RVUFirebase) return;
     let clubIds = dataset.club
@@ -1550,11 +1619,13 @@ export async function handleAction(action, dataset) {
   renderAtTop();
 }
 
+// Auth listeners live in bindEvents() behind window.rvuAuthListenersBound. Registering a
+// second pair here made every sign-in run the full campus load twice.
 window.addEventListener("rvu-auth-user", (event) => {
-  if (event.detail) {
-    enterAuthenticatedApp(event.detail);
-  } else {
+  if (!event.detail) {
     state.authed = false;
+    state.authResolved = true;
+    state.isDemoMode = false;
     state.authUser = null;
     state.role = "student";
     state.dataLoading = false;
@@ -1562,13 +1633,35 @@ window.addEventListener("rvu-auth-user", (event) => {
   }
 });
 
-window.addEventListener("rvu-auth-error", (event) => {
-  if (event.detail) window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: event.detail, type: "info" } }));
-});
-
-if (window.RVUFirebase?.auth?.currentUser) {
-  enterAuthenticatedApp(window.RVUFirebase.auth.currentUser);
+// Hold the restoring-session splash until Firebase has replayed persisted auth, otherwise
+// the landing page flashes and a returning user is asked to sign in again.
+const authReady = window.RVUFirebase?.authReady;
+if (authReady) {
+  render();
+  // Never let a stalled Firebase leave the user staring at the splash.
+  const splashTimeout = window.setTimeout(() => {
+    if (!state.authResolved) {
+      state.authResolved = true;
+      state.dataLoading = false;
+      render();
+    }
+  }, 4000);
+  authReady.then((user) => {
+    window.clearTimeout(splashTimeout);
+    state.authResolved = true;
+    if (user) {
+      enterAuthenticatedApp(user).catch((error) => {
+        state.dataLoading = false;
+        render();
+        window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: error.message || "Could not restore session.", type: "info" } }));
+      });
+    } else {
+      state.dataLoading = false;
+      render();
+    }
+  });
 } else {
+  state.authResolved = true;
   state.dataLoading = false;
   render();
 }

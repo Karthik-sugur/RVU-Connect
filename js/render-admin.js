@@ -211,8 +211,52 @@ export function renderClubAdmin() {
             </div>`;
           }).join("")}
         </article>
+        ${renderManagedClubRosters(accesses)}
       </div>
     </section>
+  `;
+}
+
+function renderManagedClubRosters(accesses) {
+  const myEmail = (state.authUser?.email || "").trim().toLowerCase();
+  const rosters = state.managedClubMembers || {};
+
+  return `
+    <article class="admin-card wide">
+      <span class="section-num">Team</span>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:12px;flex-wrap:wrap;">
+        <div>
+          <h2 style="margin:0;">Club core team</h2>
+          <p style="margin:8px 0 0;font-size:13px;color:#8a7a6a;">Current approved core members. Any approved core member of a club can remove another member of that same club.</p>
+        </div>
+        <button style="background:none;border:1.5px solid #c8b89a;padding:4px 10px;font-size:11px;font-weight:700;color:#5a4a3a;cursor:pointer;text-transform:uppercase;" data-action="load-club-rosters">Refresh</button>
+      </div>
+      ${state._managedClubMembersLoading
+        ? `<div style="text-align:center;padding:20px;color:#8a7a6a;font-size:13px;">Loading core team…</div>`
+        : accesses.map((access) => {
+          const club = access.club || {};
+          const clubId = club.id || club.slug || "";
+          const members = rosters[clubId] || [];
+          return `
+            <h3 style="font-size:13px;margin:18px 0 8px;text-transform:uppercase;letter-spacing:0.08em;color:#5a4a3a;">${escapeHtml(club.name || "Club")} <small style="color:#8a7a6a;font-weight:600;">(${members.length})</small></h3>
+            ${members.length ? members.map((member) => {
+              const email = (member.email || member.id || "").trim().toLowerCase();
+              const isSelf = email && email === myEmail;
+              const canRemove = email && !isSelf && !member.permanent;
+              return `
+                <div class="admin-row">
+                  <div>
+                    <strong>${escapeHtml(member.name || email || "Core member")}</strong>
+                    <span>${escapeHtml(email)}${member.role ? ` · ${escapeHtml(member.role)}` : ""}${member.permanent ? " · Founder" : ""}</span>
+                  </div>
+                  ${canRemove
+                    ? `<div class="admin-row-actions"><button data-action="remove-club-core-member" data-club="${escapeHtml(clubId)}" data-email="${escapeHtml(email)}" data-name="${escapeHtml(member.name || email)}">Remove</button></div>`
+                    : (isSelf ? `<span class="tag">You</span>` : "")}
+                </div>`;
+            }).join("") : `<p style="font-size:13px;color:#8a7a6a;margin:0 0 8px;">No approved core members listed for this club yet.</p>`}
+          `;
+        }).join("")}
+    </article>
   `;
 }
 

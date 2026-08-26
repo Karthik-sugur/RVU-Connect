@@ -24,7 +24,17 @@ async function signInWithGoogle() {
   return requireRvuUser(result.user);
 }
 
+// Resolves once Firebase has replayed persisted auth. The app waits on this instead of
+// reading auth.currentUser synchronously, which is always null on a cold load.
+let markAuthReady;
+const authReady = new Promise((resolve) => { markAuthReady = resolve; });
+let authSettled = false;
+
 onAuthStateChanged(auth, (user) => {
+  if (!authSettled) {
+    authSettled = true;
+    markAuthReady(user || null);
+  }
   window.dispatchEvent(new CustomEvent("rvu-auth-user", { detail: user }));
 });
 
@@ -405,7 +415,8 @@ async function resolveOwnClubAccesses({ uid, email, clubs, clubApplications, pro
  */
 async function ensureOwnCoreMembersFromApplications({ uid, email, clubApplications, name }) {
   const emailKey = String(email || "").trim().toLowerCase();
-  if (!uid || !emailKey) return;
+  if (!uid || !emailKey) return 0;
+  let healed = 0;
   const approved = (clubApplications || []).filter((a) => a.status === "approved" && a.clubId);
   for (const app of approved) {
     const memberRef = doc(db, "clubs", app.clubId, "coreMembers", emailKey);
@@ -430,10 +441,12 @@ async function ensureOwnCoreMembersFromApplications({ uid, email, clubApplicatio
         healedFromApplication: deterministicId,
         updatedAt: serverTimestamp(),
       }, { merge: true });
+      healed += 1;
     } catch (_) {
       /* fellow core / super-admin repair covers legacy auto-id apps */
     }
   }
+  return healed;
 }
 
 /** Club cores: rewrite missing coreMembers docs from approved applications for a club. */
@@ -469,21 +482,52 @@ async function ensureCoreMembersFromApprovedApps(clubId) {
   return fixed;
 }
 
-async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
-  const [eventsSnap, announcementsSnap, projectsSnap] = await Promise.all([
+function loadPublicCampusData() {
+  return Promise.all([
     getDocs(query(collection(db, "events"), where("status", "==", "published"), orderBy("createdAt", "desc"), limit(20))).catch(() => ({ docs: [] })),
     getDocs(query(collection(db, "announcements"), where("status", "==", "published"), orderBy("createdAt", "desc"), limit(20))).catch(() => ({ docs: [] })),
     getDocs(query(collection(db, "projects"), orderBy("createdAt", "desc"), limit(20))).catch(() => ({ docs: [] })),
+    rowsOrEmpty("approved clubs", getDocs(query(collection(db, "clubs"), where("status", "==", "approved"), limit(100)))),
+    rowsOrEmpty("site settings", getDocs(collection(db, "siteSettings"))),
+  ]).then(([eventsSnap, announcementsSnap, projectsSnap, clubsRows, settingsRows]) =>
+    ({ eventsSnap, announcementsSnap, projectsSnap, clubsRows, settingsRows }));
+}
+
+function loadOwnUserData(uid) {
+  return Promise.all([
+    rowsOrEmpty("saved items", getDocs(query(collection(db, "users", uid, "savedItems"), limit(50)))),
+    rowsOrEmpty("followed clubs", getDocs(query(collection(db, "users", uid, "followedClubs"), limit(50)))),
+    rowsOrEmpty("event RSVPs", getDocs(query(collection(db, "users", uid, "rsvps"), limit(50)))),
+    rowsOrEmpty("club applications", getDocs(query(collection(db, "clubApplications"), where("uid", "==", uid), limit(20)))),
+    rowsOrEmpty("host requests", getDocs(query(collection(db, "hostRequests"), where("uid", "==", uid), limit(50)))),
+  ]).then(([savedRows, followRows, rsvpRows, clubAppRows, ownHostRequests]) =>
+    ({ savedRows, followRows, rsvpRows, clubAppRows, ownHostRequests }));
+}
+
+function loadAdminBootstrapData() {
+  return Promise.all([
+    rowsOrEmpty("all clubs", getDocs(query(collection(db, "clubs"), limit(100)))),
+    rowsOrEmpty("all schools", getDocs(query(collection(db, "schools"), limit(100)))),
+  ]).then(([allClubRows, allSchoolRows]) => ({ allClubRows, allSchoolRows }));
+}
+
+async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
+  const currentUser = auth.currentUser;
+  const uid = currentUser?.email ? currentUser.uid : "";
+
+  // One concurrent batch. These used to run as four awaited stages, so every sign-in paid
+  // four sequential round trips before the first pixel of campus data appeared.
+  const [publicData, ownData, adminData] = await Promise.all([
+    loadPublicCampusData(),
+    uid ? loadOwnUserData(uid) : null,
+    superAdmin ? loadAdminBootstrapData() : null,
   ]);
+
+  const { eventsSnap, announcementsSnap, projectsSnap, clubsRows, settingsRows } = publicData;
 
   lastDocs.events = eventsSnap.docs[eventsSnap.docs.length - 1] || null;
   lastDocs.announcements = announcementsSnap.docs[announcementsSnap.docs.length - 1] || null;
   lastDocs.projects = projectsSnap.docs[projectsSnap.docs.length - 1] || null;
-
-  const [clubsRows, settingsRows] = await Promise.all([
-    rowsOrEmpty("approved clubs", getDocs(query(collection(db, "clubs"), where("status", "==", "approved"), limit(100)))),
-    rowsOrEmpty("site settings", getDocs(collection(db, "siteSettings"))),
-  ]);
 
   const announcementRows = rows(announcementsSnap).filter((item) => !isAnnouncementExpired(item));
 
@@ -518,16 +562,9 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
     schoolAccesses: [],
   };
 
-  if (auth.currentUser?.email) {
-    const email = auth.currentUser.email.trim().toLowerCase();
-    const uid = auth.currentUser.uid;
-    const [savedRows, followRows, rsvpRows, clubAppRows] = await Promise.all([
-      rowsOrEmpty("saved items", getDocs(query(collection(db, "users", uid, "savedItems"), limit(50)))),
-      rowsOrEmpty("followed clubs", getDocs(query(collection(db, "users", uid, "followedClubs"), limit(50)))),
-      rowsOrEmpty("event RSVPs", getDocs(query(collection(db, "users", uid, "rsvps"), limit(50)))),
-      rowsOrEmpty("club applications", getDocs(query(collection(db, "clubApplications"), where("uid", "==", uid), limit(20)))),
-    ]);
-    const ownHostRequests = await rowsOrEmpty("host requests", getDocs(query(collection(db, "hostRequests"), where("uid", "==", uid), limit(50))));
+  if (ownData) {
+    const email = currentUser.email.trim().toLowerCase();
+    const { savedRows, followRows, rsvpRows, clubAppRows, ownHostRequests } = ownData;
 
     // Direct coreMembers/{email} reads — reliable. Do not depend on collectionGroup queries.
     const memberDocs = await resolveOwnClubAccesses({
@@ -540,9 +577,10 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
 
     // Self-heal: if an application is approved but coreMembers is missing, restore it when rules allow
     // (deterministic app id) or when the membership doc already exists under another path.
-    await ensureOwnCoreMembersFromApplications({ uid, email, clubApplications: clubAppRows, name: profile.name });
-    // Re-resolve after heal so access unlocks on the same login.
-    if (clubAppRows.some((a) => a.status === "approved")) {
+    const healedCount = await ensureOwnCoreMembersFromApplications({ uid, email, clubApplications: clubAppRows, name: profile.name });
+    // Only worth re-resolving when the heal actually wrote something. Re-running it
+    // unconditionally doubled the per-club membership reads on every single login.
+    if (healedCount > 0) {
       const healed = await resolveOwnClubAccesses({
         uid,
         email,
@@ -627,13 +665,14 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
     }
 
     // Keep both grants in sync after separate approvals (no manual Repair on every login).
-    await syncDualRoleGrants({
+    // Best-effort writes that nothing below reads, so they must not hold up first paint.
+    syncDualRoleGrants({
       uid,
       profile,
       ownHostRequests,
       hasClubAccess: memberDocs.length > 0,
       hasSchoolAccess: schoolAccesses.length > 0,
-    });
+    }).catch(() => {});
 
     data.clubAccesses = memberDocs;
     data.clubAccess = memberDocs[0] || null;
@@ -646,14 +685,9 @@ async function loadCampusData({ superAdmin = false, profile = {} } = {}) {
     data.clubApplications = clubAppRows;
   }
 
-  if (superAdmin) {
-    // Only load basic admin context initially, not everything.
-    const [allClubRows, allSchoolRows] = await Promise.all([
-      rowsOrEmpty("all clubs", getDocs(query(collection(db, "clubs"), limit(100)))),
-      rowsOrEmpty("all schools", getDocs(query(collection(db, "schools"), limit(100)))),
-    ]);
-    data.allClubs = allClubRows;
-    data.allSchools = allSchoolRows;
+  if (adminData) {
+    data.allClubs = adminData.allClubRows;
+    data.allSchools = adminData.allSchoolRows;
   }
 
   return data;
@@ -1037,6 +1071,22 @@ async function createProject(payload) {
     updatedAt: serverTimestamp(),
   });
   return { id: ref.id, ...payload, createdAt: new Date().toISOString() };
+}
+
+async function updateProject(projectId, payload) {
+  if (!projectId) throw new Error("Project id required.");
+  const updates = pickFields(payload, [
+    "title", "description", "skills", "tags", "expiry",
+    "contactPhone", "applicationLink", "status",
+  ]);
+  if (updates.status !== undefined) {
+    requireOneOf(updates.status, ["open", "closed"], "Project status");
+  }
+  await tracedUpdateDoc(doc(db, "projects", projectId), {
+    ...updates,
+    updatedAt: serverTimestamp(),
+  });
+  return updates;
 }
 
 /* ── Admin CRUD operations ── */
@@ -1652,6 +1702,7 @@ async function loadAdminTab(tabName, lastDocId = null) {
 window.RVUFirebase = {
   app,
   auth,
+  authReady,
   db,
   analytics,
   assignClubCoreRole,
@@ -1703,6 +1754,7 @@ window.RVUFirebase = {
   updateDocument,
   updateEventStatus,
   updateHostRequestStatus,
+  updateProject,
   updateSiteSetting,
   updateUserRole,
   removeClubCoreRole,

@@ -1129,7 +1129,6 @@ async function handleAction(action, id) {
     return;
   }
   if (action === "toggle-suspend-user") {
-    // Legacy action ignored
     return;
   }
   if (action === "load-more-admin-tab") {

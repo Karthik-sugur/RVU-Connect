@@ -4,9 +4,23 @@ import { isClubCore, isSchoolRep, isSuperAdmin, canHost, canManageClub, canManag
 import { bindEvents } from './main.js';
 import { renderAdminConsole } from './render-admin.js';
 
+function renderSessionRestoring() {
+  return `
+    <div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;background:#f5f2ec;">
+      <div style="width:34px;height:34px;border:3px solid #d8cfc4;border-top-color:#D7AC54;border-radius:50%;animation:rvu-spin 0.8s linear infinite;"></div>
+      <p style="font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#8a7a6a;font-family:inherit;margin:0;">Restoring your session</p>
+    </div>
+    <style>@keyframes rvu-spin{to{transform:rotate(360deg)}}</style>
+  `;
+}
+
 export function render() {
   try {
-    app.innerHTML = state.authed ? renderAppShell() : renderLanding();
+    if (state.authed) {
+      app.innerHTML = renderAppShell();
+    } else {
+      app.innerHTML = state.authResolved ? renderLanding() : renderSessionRestoring();
+    }
     bindEvents();
   } catch (err) {
     console.error("Render Error:", err);
@@ -656,11 +670,43 @@ export function renderHome() {
   `;
 }
 
+function matchesEventClub(event, clubName) {
+  if (clubName === "All") return true;
+  const club = clubs.find((item) => item.name === clubName);
+  if (!club) return true;
+  return event.club === club.name
+    || event.host === club.name
+    || event.clubId === club.id
+    || event.clubId === club.slug;
+}
+
+function matchesEventDate(event, range) {
+  if (range === "All upcoming") return true;
+  const raw = String(event.date || "").trim();
+  // Keep anything we cannot parse, the same way normalizeEvent treats an unreadable
+  // date as not-past. Dropping them made the filter look broken on non-ISO records.
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return true;
+  const when = new Date(`${raw}T23:59:59`);
+  if (Number.isNaN(when.getTime())) return true;
+  const now = Date.now();
+  const days = range === "This week" ? 7 : 30;
+  return when.getTime() >= now && when.getTime() <= now + days * 24 * 60 * 60 * 1000;
+}
+
 export function renderEvents() {
   if (state.selectedEventId) return renderEventDetail();
   const cats = platformSettings().eventCategories;
   const typeOptions = ["All", ...(cats.length ? cats : ["Club Event", "School Event"])];
-  const filtered = events.filter((event) => !event.past && (state.filters.eventType === "All" || event.type === state.filters.eventType));
+  const clubOptions = ["All", ...clubs.map((club) => club.name)];
+  const dateOptions = ["All upcoming", "This week", "This month"];
+  const selectedClub = clubOptions.includes(state.filters.eventClub) ? state.filters.eventClub : "All";
+  const selectedDate = dateOptions.includes(state.filters.eventDate) ? state.filters.eventDate : "All upcoming";
+  const filtered = events.filter((event) =>
+    !event.past
+    && (state.filters.eventType === "All" || event.type === state.filters.eventType)
+    && matchesEventClub(event, selectedClub)
+    && matchesEventDate(event, selectedDate)
+  );
   const upcoming = filtered.sort((a, b) => a.sort - b.sort);
   return `
     <section class="page-head">
@@ -670,8 +716,8 @@ export function renderEvents() {
     </section>
     <div class="filters">
       ${selectField("eventType", "Type", typeOptions, state.filters.eventType)}
-      ${selectField("club", "Club", ["All", ...clubs.map((club) => club.name)], "All")}
-      ${selectField("date", "Date", ["All upcoming", "This week", "This month"], "All upcoming")}
+      ${selectField("eventClub", "Club", clubOptions, selectedClub)}
+      ${selectField("eventDate", "Date", dateOptions, selectedDate)}
     </div>
     <section class="section">
       <div class="section-title"><h2>Upcoming</h2><span>${upcoming.length} events</span></div>
@@ -1057,7 +1103,7 @@ export function renderProjectDetail() {
   }
 
   const isOpen = project.status === "open";
-  const isMyProject = project.postedBy === state.authUser?.email || isSuperAdmin();
+  const isMyProject = isProjectOwner(project) || isSuperAdmin();
   const isLoggedIn = !!state.authUser;
 
   return `
@@ -1130,11 +1176,80 @@ export function renderProjectDetail() {
           </div>`}
 
         ${isMyProject ? `
-          <div style="display:flex;gap:8px;padding-top:16px;border-top:1px solid #e8e0d4;">
+          <div style="display:flex;gap:8px;padding-top:16px;border-top:1px solid #e8e0d4;flex-wrap:wrap;">
+            <button style="background:#D7AC54;border:1.5px solid #D7AC54;padding:8px 16px;font-size:11px;font-weight:800;color:#1a1a1a;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;" data-action="open-edit-project" data-docid="${project.id}">Edit Project</button>
             <button style="background:none;border:1.5px solid #c8b89a;padding:8px 16px;font-size:11px;font-weight:700;color:#5a4a3a;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;" data-action="toggle-project-status" data-docid="${project.id}" data-status="${escapeHtml(project.status)}">${isOpen ? "Close Project" : "Reopen"}</button>
             <button style="background:none;border:1.5px solid #c8b89a;padding:8px 16px;font-size:11px;font-weight:700;color:#a09080;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:0.05em;" data-action="delete-own-project" data-docid="${project.id}" data-title="${escapeHtml(project.title)}">Delete</button>
           </div>` : ""}
 
+      </div>
+      ${state.editProjectOpen && state.editProjectId === project.id ? renderEditProjectModal(project) : ""}
+    </div>
+  `;
+}
+
+export function isProjectOwner(project) {
+  if (!project) return false;
+  const uid = state.authUser?.uid;
+  if (uid && project.ownerId) return project.ownerId === uid;
+  if (uid && project.createdBy) return project.createdBy === uid;
+  const email = (state.authUser?.email || "").trim().toLowerCase();
+  return Boolean(email) && String(project.postedBy || "").trim().toLowerCase() === email;
+}
+
+export function renderEditProjectModal(project) {
+  return `
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px 0 80px;">
+      <div style="background:#f5f2ec;width:100%;max-width:600px;margin:0 16px;">
+
+        <div style="padding:24px 24px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1.5px solid #d8cfc4;">
+          <h2 style="font-size:18px;font-weight:800;color:#1a1a1a;margin:0;font-family:inherit;text-transform:uppercase;letter-spacing:0.03em;">Edit Project</h2>
+          <button style="background:none;border:none;font-size:20px;color:#8a7a6a;cursor:pointer;font-family:inherit;" data-action="close-edit-project">×</button>
+        </div>
+
+        <div style="padding:24px;">
+
+          <div style="margin-bottom:20px;">
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Project Title *</label>
+            <input id="ep-title" type="text" value="${escapeHtml(project.title || "")}" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
+          </div>
+
+          <div style="margin-bottom:20px;">
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Description *</label>
+            <textarea id="ep-description" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;resize:vertical;min-height:100px;">${escapeHtml(project.description || "")}</textarea>
+          </div>
+
+          <div style="margin-bottom:20px;">
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Skills Required</label>
+            <input id="ep-skills" type="text" value="${escapeHtml((project.skills || []).join(", "))}" placeholder="React, Python, UI Design... (comma separated)" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
+          </div>
+
+          <div style="margin-bottom:20px;">
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Tags</label>
+            <input id="ep-tags" type="text" value="${escapeHtml((project.tags || []).join(", "))}" placeholder="AI, Web Dev, Design... (comma separated)" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
+          </div>
+
+          <div style="margin-bottom:20px;">
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Project Deadline</label>
+            <input id="ep-expiry" type="date" value="${escapeHtml(project.expiry || "")}" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
+          </div>
+
+          <div style="margin-bottom:20px;">
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Contact Phone</label>
+            <input id="ep-phone" type="text" value="${escapeHtml(project.contactPhone || "")}" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
+          </div>
+
+          <div style="margin-bottom:24px;">
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">External Application Link</label>
+            <input id="ep-applink" type="url" value="${escapeHtml(project.applicationLink || "")}" placeholder="https://..." style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
+          </div>
+
+          <div style="display:flex;gap:10px;">
+            <button style="flex:1;background:#D7AC54;color:#1a1a1a;border:none;padding:12px;font-size:12px;font-weight:800;font-family:inherit;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;" data-action="submit-edit-project" data-docid="${project.id}">Save Changes</button>
+            <button style="background:none;border:1.5px solid #c8b89a;color:#5a4a3a;padding:12px 20px;font-size:12px;font-weight:700;font-family:inherit;cursor:pointer;text-transform:uppercase;" data-action="close-edit-project">Cancel</button>
+          </div>
+
+        </div>
       </div>
     </div>
   `;
@@ -1142,7 +1257,12 @@ export function renderProjectDetail() {
 
 export function renderAnnouncements() {
   if (state.selectedAnnouncementId) return renderAnnouncementDetail();
-  const filtered = announcements.filter((item) => state.filters.announcementType === "All" || item.type === state.filters.announcementType);
+  const tagOptions = ["All", ...platformSettings().announcementTags];
+  const selectedTag = tagOptions.includes(state.filters.announcementTag) ? state.filters.announcementTag : "All";
+  const filtered = announcements.filter((item) =>
+    (state.filters.announcementType === "All" || item.type === state.filters.announcementType)
+    && (selectedTag === "All" || String(item.tag || "").toLowerCase() === selectedTag.toLowerCase())
+  );
   return `
     <section class="page-head">
       ${sectionLabel("05", "Structured updates")}
@@ -1151,7 +1271,7 @@ export function renderAnnouncements() {
     </section>
     <div class="filters">
       ${selectField("announcementType", "Source Type", ["All", "Club", "School"], state.filters.announcementType)}
-      ${selectField("announcementTag", "Tag", ["All", ...platformSettings().announcementTags], "All")}
+      ${selectField("announcementTag", "Tag", tagOptions, selectedTag)}
     </div>
     ${filtered.length ? `<div class="updates">${filtered.map(renderAnnouncement).join("")}</div>` : renderEmptyState("No announcements yet", "Approved clubs and school representatives can publish structured updates.")}
     <div style="text-align:center; margin-top: 30px;"><button class="btn secondary" data-action="load-more" data-collection="announcements">Load More</button></div>
@@ -1755,7 +1875,6 @@ export function renderAnnouncement(item) {
   `;
 }
 
-/* renderAdminPanel removed — superseded by renderSuperAdmin */
 
 export function renderOnboarding() {
   if (state.onboardingStep === "role") {

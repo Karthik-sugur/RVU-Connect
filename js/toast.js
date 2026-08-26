@@ -21,10 +21,8 @@ window.addEventListener("rvu-toast", (e) => {
   
   document.body.appendChild(toast);
   
-  // Fade in
   setTimeout(() => { toast.style.opacity = "1"; }, 10);
   
-  // Fade out and remove
   setTimeout(() => {
     toast.style.opacity = "0";
     setTimeout(() => toast.remove(), 300);

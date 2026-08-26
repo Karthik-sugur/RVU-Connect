@@ -25,13 +25,11 @@ export function parseRoute() {
 export function navigate(route, params = {}) {
   state.route = route;
   
-  // Clear specifics if navigating to main route
   if (route !== "events") state.selectedEventId = null;
   if (route !== "projects") state.selectedProjectId = null;
   if (route !== "announcements") state.selectedAnnouncementId = null;
   if (route !== "clubs") state.selectedClubSlug = null;
   
-  // Apply params
   if (params.eventId) state.selectedEventId = params.eventId;
   if (params.projectId) state.selectedProjectId = params.projectId;
   if (params.announcementId) state.selectedAnnouncementId = params.announcementId;
@@ -74,7 +72,6 @@ export async function renderCurrentRoute() {
 
   if (state.route === "admin" && window.RVUFirebase) {
     const tab = state.adminTab || "requests";
-    // Check if we need to load this tab data
     let needsLoad = false;
     if (tab === "requests" && state.hostRequests.length === 0) needsLoad = true;
     else if (tab === "flags" && state.moderationFlags.length === 0) needsLoad = true;
@@ -124,6 +121,28 @@ export async function renderCurrentRoute() {
           console.warn("[RVU] Failed to auto-load club applicants", error);
         } finally {
           state._clubApplicantsLoading = false;
+        }
+      }
+    }
+
+    // Current core roster for every managed club, so the panel can list and remove members.
+    if (isClubCore() && state.host.approved && !isSuperAdmin() && !state._managedClubMembersLoaded && !state._managedClubMembersLoading) {
+      const clubIds = (state.host.clubAccesses || [])
+        .map((access) => access.club?.id || access.club?.slug)
+        .filter(Boolean);
+      if (clubIds.length) {
+        state._managedClubMembersLoading = true;
+        try {
+          const rosters = await Promise.all(clubIds.map((clubId) =>
+            window.RVUFirebase.listClubCoreMembers(clubId).catch(() => [])));
+          const byClub = {};
+          clubIds.forEach((clubId, index) => { byClub[clubId] = rosters[index] || []; });
+          state.managedClubMembers = byClub;
+          state._managedClubMembersLoaded = true;
+        } catch (error) {
+          console.warn("[RVU] Failed to auto-load club core rosters", error);
+        } finally {
+          state._managedClubMembersLoading = false;
         }
       }
     }

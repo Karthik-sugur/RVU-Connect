@@ -28,6 +28,5 @@ export function handleFirebaseError(error, context = "An operation failed") {
 }
 
 export function showToast(message, type = "info") {
-  // Try to dispatch an event that ui.js listens to, or directly manipulate DOM
   window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message, type } }));
 }
