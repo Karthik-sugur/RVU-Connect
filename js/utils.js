@@ -112,11 +112,11 @@ export function icon(name) {
 export function multiSelectField(name, label, options, selectedValues = []) {
   return `
     <div class="field" style="margin-bottom: 16px;">
-      <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">${label}</label>
+      <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">${escapeHtml(label)}</label>
       <div style="max-height: 150px; overflow-y: auto; border: 1.5px solid #c8b89a; padding: 12px;">
         ${options.map((opt) => `
           <label style="display:flex;align-items:center;gap:12px;font-size:14px;margin-bottom:12px;cursor:pointer;color:#1a1a1a;">
-            <input type="checkbox" name="${name}" value="${escapeHtml(opt.id)}" ${selectedValues.includes(opt.id) ? "checked" : ""} style="cursor:pointer;width:18px;height:18px;accent-color:#D7AC54;" data-multi-select="${name}" />
+            <input type="checkbox" name="${escapeHtml(name)}" value="${escapeHtml(opt.id)}" ${selectedValues.includes(opt.id) ? "checked" : ""} style="cursor:pointer;width:18px;height:18px;accent-color:#D7AC54;" data-multi-select="${escapeHtml(name)}" />
             ${escapeHtml(opt.name)}
           </label>
         `).join("")}
@@ -125,12 +125,16 @@ export function multiSelectField(name, label, options, selectedValues = []) {
   `;
 }
 
+// Option text carries Firestore data (club names, categories, schools, project and
+// announcement tags). A tag of `</select><img src=x onerror=...>` closes the select and
+// escapes the "in select" parser mode, so the markup after it runs. The explicit value
+// attribute keeps field.value exact once the text is entity-encoded.
 export function selectField(name, label, options, value) {
   return `
     <div class="field">
-      <label>${label}</label>
-      <select data-filter="${name}">
-        ${options.map((option) => `<option ${option === value ? "selected" : ""}>${option}</option>`).join("")}
+      <label>${escapeHtml(label)}</label>
+      <select data-filter="${escapeHtml(name)}">
+        ${options.map((option) => `<option value="${escapeHtml(option)}" ${option === value ? "selected" : ""}>${escapeHtml(option)}</option>`).join("")}
       </select>
     </div>
   `;
