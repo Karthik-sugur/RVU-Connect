@@ -232,13 +232,20 @@ async function loadAdminData() {
   const campusData = await window.RVUFirebase.loadCampusData({ superAdmin: true });
 
   let liveHostRequests = null;
+  let liveClubApps = [];
   try {
-    const reqRes = await window.RVUFirebase.loadAdminTab("requests");
+    const [reqRes, clubApps] = await Promise.all([
+      window.RVUFirebase.loadAdminTab("requests"),
+      window.RVUFirebase.loadAllPendingClubApplications().catch(() => [])
+    ]);
     if (reqRes && Array.isArray(reqRes.docs)) {
       liveHostRequests = reqRes.docs;
     }
+    if (Array.isArray(clubApps)) {
+      liveClubApps = clubApps;
+    }
   } catch (err) {
-    console.warn("Could not fetch live host requests:", err);
+    console.warn("Could not fetch live requests:", err);
   }
 
   const data = applyDemoCampusData({
@@ -248,6 +255,7 @@ async function loadAdminData() {
 
   state.data = {
     hostRequests: liveHostRequests !== null ? liveHostRequests : (data.hostRequests || []),
+    clubApplications: liveClubApps,
     moderationFlags: data.moderationFlags || [],
     allUsers: data.allUsers || [],
     allEvents: data.allEvents || [],
@@ -483,12 +491,28 @@ function renderOverview() {
 function renderRequests() {
   const pending = (state.data.hostRequests || []).filter((item) => !item.status || item.status === "pending");
   const resolved = (state.data.hostRequests || []).filter((item) => item.status && item.status !== "pending");
+  const clubApps = state.data.clubApplications || [];
   return `
     <div class="grid">
       <article class="panel wide">
-        <p class="eyebrow">Pending</p>
-        <h3>Approve host access</h3>
-        ${listRows(pending, requestRow, "No pending requests.")}
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px;">
+          <div>
+            <p class="eyebrow" style="margin:0;">Pending</p>
+            <h3 style="margin:4px 0 0;">Host &amp; New Club Requests (${pending.length})</h3>
+          </div>
+          <button class="btn secondary" style="padding:6px 14px;font-size:12px;" data-action="refresh-requests">↻ Refresh Requests</button>
+        </div>
+        ${listRows(pending, requestRow, "No pending host requests.")}
+
+        <div style="height:1px;background:#3a3228;margin:28px 0 20px;"></div>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px;">
+          <div>
+            <p class="eyebrow" style="margin:0;">Club Applications</p>
+            <h3 style="margin:4px 0 0;">Pending Club Membership Applications (${clubApps.length})</h3>
+          </div>
+        </div>
+        ${listRows(clubApps, clubAppRow, "No pending club membership applications.")}
       </article>
       <article class="panel wide">
         <p class="eyebrow">History</p>
@@ -498,6 +522,18 @@ function renderRequests() {
       </article>
     </div>
   `;
+}
+
+function clubAppRow(app) {
+  const clubName = (state.data.allClubs || []).find((c) => c.id === app.clubId || c.slug === app.clubId)?.name || app.clubId || "Club";
+  return row(
+    app.name || app.email,
+    `${app.email || ""} · Club: ${clubName}`,
+    `
+      <button class="mini-btn" data-action="approve-club-app" data-id="${app.id}" data-uid="${app.uid || ""}" data-email="${escapeHtml(app.email || "")}" data-name="${escapeHtml(app.name || "")}" data-club="${app.clubId}">Approve</button>
+      <button class="mini-btn danger" data-action="reject-club-app" data-id="${app.id}">Reject</button>
+    `
+  );
 }
 
 function requestRow(item) {
@@ -921,13 +957,38 @@ async function handleAction(action, id) {
     await refresh();
     return;
   }
+  if (action === "refresh-requests") {
+    await refresh();
+    showToast("Requests refreshed.");
+    return;
+  }
   if (action === "approve-request" || action === "reject-request") {
     const newStatus = action === "approve-request" ? "approved" : "rejected";
     await window.RVUFirebase.updateHostRequestStatus(id, newStatus);
     const item = state.data?.hostRequests?.find((r) => r.id === id);
     if (item) item.status = newStatus;
     await refresh();
-    showToast("Request updated.");
+    showToast(`Request ${newStatus}.`);
+    return;
+  }
+  if (action === "approve-club-app") {
+    const btn = document.querySelector(`[data-action="approve-club-app"][data-id="${id}"]`);
+    const uid = btn?.dataset.uid || "";
+    const email = btn?.dataset.email || "";
+    const name = btn?.dataset.name || "";
+    const clubId = btn?.dataset.club || "";
+    await window.RVUFirebase.approveClubApplication(id, { uid, email, name, clubId });
+    state.data.clubApplications = (state.data.clubApplications || []).filter(a => a.id !== id);
+    await refresh();
+    showToast("Club application approved.");
+    return;
+  }
+  if (action === "reject-club-app") {
+    if (!window.confirm("Reject this club application?")) return;
+    await window.RVUFirebase.rejectClubApplication(id);
+    state.data.clubApplications = (state.data.clubApplications || []).filter(a => a.id !== id);
+    await refresh();
+    showToast("Club application rejected.");
     return;
   }
   if (action === "create-club") {

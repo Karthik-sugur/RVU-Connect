@@ -455,7 +455,13 @@ export async function handleAction(action, dataset) {
     state.adminTab = tab;
     if (window.RVUFirebase && isSuperAdmin()) {
       state.dataLoading = true;
-      if (tab === "requests") state.hostRequests = (await window.RVUFirebase.loadAdminTab(tab)).docs;
+      if (tab === "requests") {
+        state.hostRequests = (await window.RVUFirebase.loadAdminTab(tab)).docs || [];
+        try {
+          state.clubApplicants = await window.RVUFirebase.loadAllPendingClubApplications();
+          state._clubApplicantsLoaded = true;
+        } catch (_) {}
+      }
       else if (tab === "flags" || tab === "moderation") state.moderationFlags = (await window.RVUFirebase.loadAdminTab(tab)).docs;
       else if (tab === "users") state.allUsers = (await window.RVUFirebase.loadAdminTab(tab)).docs;
       else if (tab === "clubs") state.allClubs = (await window.RVUFirebase.loadAdminTab(tab)).docs;
