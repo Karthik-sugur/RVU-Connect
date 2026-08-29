@@ -420,19 +420,31 @@ export async function handleAction(action, dataset) {
   }
   if (action === "approve-host") {
     if (window.RVUFirebase && dataset.request) {
-      await window.RVUFirebase.updateHostRequestStatus(dataset.request, "approved");
-      const item = state.hostRequests.find((r) => r.id === dataset.request);
-      if (item) item.status = "approved";
-      render();
+      try {
+        await window.RVUFirebase.updateHostRequestStatus(dataset.request, "approved");
+        const item = state.hostRequests.find((r) => r.id === dataset.request);
+        if (item) item.status = "approved";
+        window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Request approved.", type: "success" } }));
+        renderAtTop();
+      } catch (err) {
+        window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: err.message || "Failed to approve request.", type: "error" } }));
+      }
     }
+    return;
   }
   if (action === "reject-host") {
     if (window.RVUFirebase && dataset.request) {
-      await window.RVUFirebase.updateHostRequestStatus(dataset.request, "rejected");
-      const item = state.hostRequests.find((r) => r.id === dataset.request);
-      if (item) item.status = "rejected";
-      render();
+      try {
+        await window.RVUFirebase.updateHostRequestStatus(dataset.request, "rejected");
+        const item = state.hostRequests.find((r) => r.id === dataset.request);
+        if (item) item.status = "rejected";
+        window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Request rejected.", type: "info" } }));
+        renderAtTop();
+      } catch (err) {
+        window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: err.message || "Failed to reject request.", type: "error" } }));
+      }
     }
+    return;
   }
   if (action === "sign-out") {
     await handleSignOut();

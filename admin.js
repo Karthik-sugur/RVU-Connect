@@ -450,6 +450,7 @@ function renderTab() {
 }
 
 function renderOverview() {
+  const pending = (state.data.hostRequests || []).filter((item) => !item.status || item.status === "pending");
   return `
     <div class="grid">
       <article class="panel">
@@ -473,15 +474,15 @@ function renderOverview() {
       <article class="panel wide">
         <p class="eyebrow">Recent requests</p>
         <h3>Approval queue</h3>
-        ${listRows(state.data.hostRequests.slice(0, 6), requestRow, "No host requests yet.")}
+        ${listRows(pending.slice(0, 6), requestRow, "No pending host requests.")}
       </article>
     </div>
   `;
 }
 
 function renderRequests() {
-  const pending = state.data.hostRequests.filter((item) => item.status === "pending");
-  const resolved = state.data.hostRequests.filter((item) => item.status !== "pending");
+  const pending = (state.data.hostRequests || []).filter((item) => !item.status || item.status === "pending");
+  const resolved = (state.data.hostRequests || []).filter((item) => item.status && item.status !== "pending");
   return `
     <div class="grid">
       <article class="panel wide">
@@ -500,10 +501,17 @@ function renderRequests() {
 }
 
 function requestRow(item) {
-  return row(item.name || item.email, `${item.type || "Request"} · ${item.roleTitle || "Representative"} · ${item.email || ""}`, `
-    <button class="mini-btn" data-action="approve-request" data-id="${item.id}">Approve</button>
-    <button class="mini-btn danger" data-action="reject-request" data-id="${item.id}">Reject</button>
-  `);
+  const isPending = !item.status || item.status === "pending";
+  return row(
+    item.name || item.email,
+    `${item.type || "Request"} · ${item.roleTitle || "Representative"} · ${item.email || ""}${!isPending ? ` · ${item.status}` : ""}`,
+    isPending
+      ? `
+        <button class="mini-btn" data-action="approve-request" data-id="${item.id}">Approve</button>
+        <button class="mini-btn danger" data-action="reject-request" data-id="${item.id}">Reject</button>
+      `
+      : `<span style="font-size:11px;font-weight:700;text-transform:uppercase;color:#8a7a6a;">${escapeHtml(item.status)}</span>`
+  );
 }
 
 function renderClubs() {
