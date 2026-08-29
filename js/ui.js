@@ -278,9 +278,9 @@ export function renderLanding() {
         <span class="hero-badge">For RV University</span>
       </div>
       <section class="hero-content">
-        <p class="eyebrow">Campus operating system</p>
+        <p class="eyebrow">Your campus, connected</p>
         <h1>Everything happening at RVU. In one place.</h1>
-        <p>Events, clubs, announcements, and student projects presented with the clarity of a modern campus command center.</p>
+        <p>Events, clubs, announcements, and student projects — all in one place for RV University.</p>
         <div class="hero-actions">
           <button class="btn gold" data-action="login-google">Continue with Google</button>
           <button class="btn ghost" data-action="preview">Explore demo</button>

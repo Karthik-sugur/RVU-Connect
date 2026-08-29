@@ -5,7 +5,7 @@
 <h1 align="center">RVU Connect</h1>
 
 <p align="center">
-  <strong>The Digital Campus Operating System for RV University</strong>
+  <strong>Your Campus, Connected — for RV University</strong>
 </p>
 
 <p align="center">
@@ -393,7 +393,7 @@ rvuconnect-main/
 
 ## 🌟 Vision
 
-> **RVU Connect aims to become the digital operating system for student life at RV University.**
+> **RVU Connect aims to be where campus life comes together at RV University — your campus, connected.**
 
 By centralizing opportunities, communication, communities, and collaboration into one platform, RVU Connect creates a more **connected**, **discoverable**, and **efficient** campus ecosystem — where no student misses an opportunity, no club goes unnoticed, and every initiative finds its audience.
 
