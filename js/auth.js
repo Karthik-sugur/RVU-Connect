@@ -2,6 +2,7 @@ import { replaceCollection } from './utils.js';
 import { schools, interests, events, clubs, announcements, projects, state } from './state.js';
 import { render, renderAtTop } from './ui.js';
 import { applyDemoCampusData } from '../sample-data.js';
+import { EMAIL_DOMAIN } from './constants.js';
 
 export function isClubCore() {
   return Boolean(state._hasClubCore) || state.role === "club-core";
@@ -210,7 +211,7 @@ export function activeClub() {
 }
 
 export function isAllowedRvuEmail(email) {
-  return typeof email === "string" && email.trim().includes("@");
+  return typeof email === "string" && email.trim().toLowerCase().endsWith(EMAIL_DOMAIN);
 }
 
 export async function syncFirebaseData({ quiet = false } = {}) {

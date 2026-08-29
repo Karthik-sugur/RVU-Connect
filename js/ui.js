@@ -1,4 +1,4 @@
-import { icon, multiSelectField, selectField, inputField, clubInputField, clubSelectField, clubTextArea, unique, escapeHtml, modalSelectField } from './utils.js';
+import { icon, multiSelectField, selectField, inputField, clubInputField, clubSelectField, clubTextArea, unique, escapeHtml, modalSelectField, safeUrl } from './utils.js';
 import { schools, interests, events, clubs, announcements, projects, state, app } from './state.js';
 import { isClubCore, isSchoolRep, isSuperAdmin, canHost, canManageClub, canManageEvent, canManageAnnouncement, isFollowingClub, isItemSaved, platformSettings, roleLabel, activeClub } from './auth.js';
 import { bindEvents } from './main.js';
@@ -748,9 +748,9 @@ export function renderEventDetail() {
         cursor:pointer;padding:20px 20px 16px;
       " data-action="close-event-detail">← All Events</button>
 
-      ${event.posterUrl ? `
+      ${event.posterUrl && safeUrl(event.posterUrl) ? `
         <div style="width:100%;height:260px;overflow:hidden;margin-bottom:0;">
-          <img src="${escapeHtml(event.posterUrl)}" style="width:100%;height:100%;object-fit:cover;" alt="${escapeHtml(event.title)}" />
+          <img src="${safeUrl(event.posterUrl)}" style="width:100%;height:100%;object-fit:cover;" alt="${escapeHtml(event.title)}" />
         </div>` : ""}
 
       <div style="padding:24px 20px;">
@@ -790,7 +790,7 @@ export function renderEventDetail() {
 
         ${!isPast && !isCancelled ? `
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:24px;">
-            ${event.link ? `<a href="${escapeHtml(event.link)}" target="_blank" rel="noopener" style="background:#D7AC54;color:#1a1a1a;border:none;padding:12px 24px;font-size:12px;font-weight:800;font-family:inherit;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:6px;">Join →</a>` : ""}
+            ${event.link && safeUrl(event.link) ? `<a href="${safeUrl(event.link)}" target="_blank" rel="noopener noreferrer" style="background:#D7AC54;color:#1a1a1a;border:none;padding:12px 24px;font-size:12px;font-weight:800;font-family:inherit;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:6px;">Join →</a>` : ""}
             <button style="background:none;border:1.5px solid #c8b89a;color:#5a4a3a;padding:12px 18px;font-size:12px;font-weight:700;font-family:inherit;letter-spacing:0.05em;text-transform:uppercase;cursor:pointer;" data-action="${isItemSaved(event.id, "event") ? "unsave-item" : "save-item"}" data-docid="${event.id}" data-kind="event" data-title="${escapeHtml(event.title)}">${isItemSaved(event.id, "event") ? "Saved" : "Save"}</button>
             ${canManageEvent(event) ? `
               <button style="background:none;border:1.5px solid #c8b89a;color:#5a4a3a;padding:12px 18px;font-size:12px;font-weight:700;font-family:inherit;letter-spacing:0.05em;text-transform:uppercase;cursor:pointer;" data-action="open-edit-event" data-docid="${event.id}">Edit</button>
@@ -892,9 +892,9 @@ export function renderClubDetail() {
         <span class="section-num">Join</span>
         <h2>${club.registrationOpen ? "Registrations are open" : "Registrations are closed"}</h2>
         <p>${club.registrationOpen ? "This club is currently accepting new members through its registration form." : "This club is visible on RVU Connect, but it is not accepting new registrations right now."}</p>
-        ${club.registrationOpen && joinHref
-          ? `<button class="btn gold" data-action="open-external-link" data-url="${escapeHtml(joinHref)}">Open join link</button>`
-          : `<span class="tag">${club.registrationOpen ? "No join link configured" : "No active join link"}</span>`}
+        ${club.registrationOpen && joinHref && safeUrl(joinHref)
+          ? `<button class="btn gold" data-action="open-external-link" data-url="${safeUrl(joinHref)}">Open join link</button>`
+          : `<span class="tag">${club.registrationOpen ? "No valid join link configured" : "No active join link"}</span>`}
       </article>
     </section>
     <section class="section">
@@ -1169,8 +1169,8 @@ export function renderProjectDetail() {
 
         ${isOpen ? `
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;">
-            ${project.applicationLink ? `
-              <a href="${escapeHtml(project.applicationLink)}" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:6px;background:#D7AC54;color:#1a1a1a;padding:12px 28px;font-size:12px;font-weight:800;font-family:inherit;letter-spacing:0.08em;text-transform:uppercase;text-decoration:none;">Apply / Join Project ↗</a>
+            ${project.applicationLink && safeUrl(project.applicationLink) ? `
+              <a href="${safeUrl(project.applicationLink)}" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:6px;background:#D7AC54;color:#1a1a1a;padding:12px 28px;font-size:12px;font-weight:800;font-family:inherit;letter-spacing:0.08em;text-transform:uppercase;text-decoration:none;">Apply / Join Project ↗</a>
             ` : `
               <div style="background:#f0ece4;border-left:3px solid #D7AC54;padding:12px 16px;flex:1;">
                 <p style="font-size:13px;color:#5a4a3a;margin:0;font-family:inherit;font-weight:600;">Contact the owner directly to collaborate.</p>
@@ -1347,18 +1347,18 @@ export function renderAnnouncementDetail() {
 
         <div style="height:1px;background:#d8cfc4;margin-bottom:24px;"></div>
 
-        ${item.imageUrl ? `
+        ${item.imageUrl && safeUrl(item.imageUrl) ? `
           <div style="margin-bottom:24px;">
-            <img src="${escapeHtml(item.imageUrl)}" style="width:100%;max-height:400px;object-fit:cover;" alt="Announcement image" />
+            <img src="${safeUrl(item.imageUrl)}" style="width:100%;max-height:400px;object-fit:cover;" alt="Announcement image" />
           </div>` : ""}
 
         <p style="font-size:15px;color:#3a3a3a;line-height:1.85;font-family:inherit;margin-bottom:28px;white-space:pre-line;">${escapeHtml(item.description || "")}</p>
 
         <div style="height:1px;background:#d8cfc4;margin-bottom:16px;"></div>
 
-        ${item.link ? `
+        ${item.link && safeUrl(item.link) ? `
           <div style="margin-bottom:24px;">
-            <a href="${escapeHtml(item.link)}" target="_blank" rel="noopener" style="background:#D7AC54;color:#1a1a1a;border:none;padding:12px 24px;font-size:12px;font-weight:800;font-family:inherit;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:6px;">Join / Learn More →</a>
+            <a href="${safeUrl(item.link)}" target="_blank" rel="noopener noreferrer" style="background:#D7AC54;color:#1a1a1a;border:none;padding:12px 24px;font-size:12px;font-weight:800;font-family:inherit;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:6px;">Join / Learn More →</a>
           </div>` : ""}
 
         <div style="display:flex;align-items:center;justify-content:space-between;">
@@ -1833,7 +1833,7 @@ export function renderClubCard(club) {
 export function renderProjectCard(project) {
   const status = project.status || "Open";
   const skills = project.skills || [];
-  const isMyProject = project.postedBy === state.authUser?.email || isSuperAdmin();
+  const isMyProject = isProjectOwner(project) || isSuperAdmin();
   return `
     <article class="card project-card" style="cursor:pointer;" data-action="open-project-detail" data-docid="${project.id}">
       <div class="project-rail"><button data-action="${isItemSaved(project.id, "project") ? "unsave-item" : "save-item"}" data-kind="project" data-docid="${project.id}" data-title="${escapeHtml(project.title)}">${icon("bookmark")}</button><span>${project.score || 0}</span></div>
@@ -1843,7 +1843,7 @@ export function renderProjectCard(project) {
         <p>${escapeHtml(project.description || "")}</p>
         <div class="chip-grid">${skills.map((skill) => `<span class="tag">${escapeHtml(skill)}</span>`).join("")}</div>
         <div style="display:flex;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap;">
-          ${status === "Open" && project.applicationLink ? `<a href="${escapeHtml(project.applicationLink)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;background:#D7AC54;color:#1a1a1a;padding:6px 16px;font-size:12px;font-weight:700;font-family:inherit;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;">Apply ↗</a>` : ""}
+          ${status === "Open" && project.applicationLink && safeUrl(project.applicationLink) ? `<a href="${safeUrl(project.applicationLink)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;background:#D7AC54;color:#1a1a1a;padding:6px 16px;font-size:12px;font-weight:700;font-family:inherit;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;">Apply ↗</a>` : ""}
           <button style="background:none;border:1.5px solid #c8b89a;color:#5a4a3a;padding:6px 14px;font-size:12px;font-weight:600;font-family:inherit;letter-spacing:0.05em;cursor:pointer;text-transform:uppercase;" data-action="${isItemSaved(project.id, "project") ? "unsave-item" : "save-item"}" data-docid="${project.id}" data-kind="project" data-title="${escapeHtml(project.title)}">${isItemSaved(project.id, "project") ? "Saved" : "Save"}</button>
           <button style="background:none;border:none;color:#a09080;padding:6px 10px;font-size:11px;font-family:inherit;cursor:pointer;text-transform:uppercase;letter-spacing:0.05em;" data-action="flag-content" data-docid="${project.id}" data-kind="project" data-title="${escapeHtml(project.title)}">Report</button>
         </div>

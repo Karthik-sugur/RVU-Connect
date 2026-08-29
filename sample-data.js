@@ -886,7 +886,7 @@ function clone(value) {
 }
 
 function preferLive(liveItems, demoItems) {
-  return liveItems && liveItems.length ? liveItems : clone(demoItems);
+  return Array.isArray(liveItems) ? liveItems : clone(demoItems);
 }
 
 export function applyDemoCampusData(data = {}) {

@@ -1,5 +1,5 @@
 import { app, auth, db, analytics } from "./firebase-init.js";
-import { getDoc, getDocs, setDoc, updateDoc, deleteDoc, deleteField, doc, collection, query, where, orderBy, limit, startAfter, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
+import { getDoc, getDocs, setDoc, updateDoc, deleteDoc, deleteField, doc, collection, query, where, orderBy, limit, startAfter, documentId, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 import { onAuthStateChanged, signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, signOut } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import { handleFirebaseError } from "./errors.js";
 import { EMAIL_DOMAIN } from "./constants.js";
@@ -1709,9 +1709,13 @@ async function loadAdminTab(tabName, lastDocId = null) {
   const map = {
     requests: "hostRequests",
     flags: "moderationFlags",
+    moderation: "moderationFlags",
     users: "users",
     events: "events",
     announcements: "announcements",
+    clubs: "clubs",
+    schools: "schools",
+    projects: "projects",
     contentReviews: "contentReviews",
     review: "contentReviews"
   };
@@ -1719,11 +1723,11 @@ async function loadAdminTab(tabName, lastDocId = null) {
   const colName = map[tabName];
   if (!colName) return { docs: [], lastDocId: null };
 
-  let q = query(collection(db, colName), limit(50));
+  let q = query(collection(db, colName), orderBy(documentId()), limit(50));
   if (lastDocId) {
     const docSnap = await getDoc(doc(db, colName, lastDocId));
     if (docSnap.exists()) {
-      q = query(collection(db, colName), startAfter(docSnap), limit(50));
+      q = query(collection(db, colName), orderBy(documentId()), startAfter(docSnap), limit(50));
     }
   }
   

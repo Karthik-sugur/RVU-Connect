@@ -16,6 +16,14 @@ export function bindEvents() {
         enterAuthenticatedApp(event.detail).catch((error) => {
           window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: error.message || "Could not complete sign-in.", type: "info" } }));
         });
+      } else if (!event.detail) {
+        state.authed = false;
+        state.authResolved = true;
+        state.isDemoMode = false;
+        state.authUser = null;
+        state.role = "student";
+        state.dataLoading = false;
+        render();
       }
     });
     window.addEventListener("rvu-auth-error", (event) => {
@@ -230,6 +238,14 @@ export async function handleAction(action, dataset) {
     state.onboardingStep = "student-interests";
   }
   if (action === "finish-student") {
+    const trimmedName = (state.user.name || "").trim();
+    if (!trimmedName) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Please enter your name.", type: "error" } }));
+      state.onboardingStep = "student-info";
+      renderAtTop();
+      return;
+    }
+    state.user.name = trimmedName;
     if (window.RVUFirebase && state.authUser) {
       await window.RVUFirebase.saveUserProfile(state.authUser.uid, {
         name: state.user.name,
@@ -427,12 +443,17 @@ export async function handleAction(action, dataset) {
     state.adminTab = tab;
     if (window.RVUFirebase && isSuperAdmin()) {
       state.dataLoading = true;
-      render();
       if (tab === "requests") state.hostRequests = (await window.RVUFirebase.loadAdminTab(tab)).docs;
-      else if (tab === "flags") state.moderationFlags = (await window.RVUFirebase.loadAdminTab(tab)).docs;
+      else if (tab === "flags" || tab === "moderation") state.moderationFlags = (await window.RVUFirebase.loadAdminTab(tab)).docs;
       else if (tab === "users") state.allUsers = (await window.RVUFirebase.loadAdminTab(tab)).docs;
+      else if (tab === "clubs") state.allClubs = (await window.RVUFirebase.loadAdminTab(tab)).docs;
+      else if (tab === "schools") state.allSchools = (await window.RVUFirebase.loadAdminTab(tab)).docs;
       else if (tab === "events") state.allEvents = (await window.RVUFirebase.loadAdminTab(tab)).docs;
       else if (tab === "announcements") state.allAnnouncements = (await window.RVUFirebase.loadAdminTab(tab)).docs;
+      else if (tab === "projects") {
+        const pDocs = (await window.RVUFirebase.loadAdminTab(tab)).docs;
+        if (pDocs.length) replaceCollection(projects, pDocs);
+      }
       else if (tab === "contentReviews") state.contentReviews = (await window.RVUFirebase.loadAdminTab(tab)).docs;
       state.dataLoading = false;
       render();
@@ -1618,20 +1639,6 @@ export async function handleAction(action, dataset) {
 
   renderAtTop();
 }
-
-// Auth listeners live in bindEvents() behind window.rvuAuthListenersBound. Registering a
-// second pair here made every sign-in run the full campus load twice.
-window.addEventListener("rvu-auth-user", (event) => {
-  if (!event.detail) {
-    state.authed = false;
-    state.authResolved = true;
-    state.isDemoMode = false;
-    state.authUser = null;
-    state.role = "student";
-    state.dataLoading = false;
-    render();
-  }
-});
 
 // Hold the restoring-session splash until Firebase has replayed persisted auth, otherwise
 // the landing page flashes and a returning user is asked to sign in again.

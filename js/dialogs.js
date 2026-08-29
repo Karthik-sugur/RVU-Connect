@@ -37,7 +37,10 @@ export function showAlert(message) {
     document.body.append(overlay);
     okBtn.focus();
 
-    const cleanup = () => { document.body.removeChild(overlay); resolve(); };
+    const cleanup = () => {
+      if (document.body.contains(overlay)) document.body.removeChild(overlay);
+      resolve();
+    };
     okBtn.onclick = cleanup;
     overlay.onkeydown = (e) => {
       if (e.key === "Enter" || e.key === "Escape") cleanup();
@@ -91,9 +94,15 @@ export function showConfirm(message) {
     document.body.append(overlay);
     okBtn.focus();
 
-    const cleanup = () => document.body.removeChild(overlay);
+    const cleanup = () => {
+      if (document.body.contains(overlay)) document.body.removeChild(overlay);
+    };
     cancelBtn.onclick = () => { cleanup(); resolve(false); };
     okBtn.onclick = () => { cleanup(); resolve(true); };
+    overlay.onkeydown = (e) => {
+      if (e.key === "Enter") { cleanup(); resolve(true); }
+      if (e.key === "Escape") { cleanup(); resolve(false); }
+    };
   });
 }
 
@@ -151,11 +160,16 @@ export function showPrompt(message, defaultValue = "") {
     document.body.append(overlay);
     input.focus();
 
-    const cleanup = () => document.body.removeChild(overlay);
+    const cleanup = () => {
+      if (document.body.contains(overlay)) document.body.removeChild(overlay);
+    };
     cancelBtn.onclick = () => { cleanup(); resolve(null); };
     okBtn.onclick = () => { cleanup(); resolve(input.value); };
     input.onkeydown = (e) => {
       if (e.key === "Enter") okBtn.onclick();
+      if (e.key === "Escape") cancelBtn.onclick();
+    };
+    overlay.onkeydown = (e) => {
       if (e.key === "Escape") cancelBtn.onclick();
     };
   });

@@ -164,8 +164,8 @@ export function modalSelectField(id, labelText, opts, selected) {
 export function inputField(name, label, value, type = "text") {
   return `
     <div class="field">
-      <label>${label}</label>
-      <input data-input="${name}" type="${type}" value="${value}" />
+      <label>${escapeHtml(label)}</label>
+      <input data-input="${escapeHtml(name)}" type="${escapeHtml(type)}" value="${escapeHtml(value || "")}" />
     </div>
   `;
 }
@@ -173,8 +173,8 @@ export function inputField(name, label, value, type = "text") {
 export function clubInputField(name, label, value, placeholder = "", type = "text") {
   return `
     <div class="field">
-      <label>${label}</label>
-      <input data-club-input="${name}" type="${type}" value="${escapeHtml(value || "")}" placeholder="${escapeHtml(placeholder)}" />
+      <label>${escapeHtml(label)}</label>
+      <input data-club-input="${escapeHtml(name)}" type="${escapeHtml(type)}" value="${escapeHtml(value || "")}" placeholder="${escapeHtml(placeholder)}" />
     </div>
   `;
 }
@@ -182,8 +182,8 @@ export function clubInputField(name, label, value, placeholder = "", type = "tex
 export function clubSelectField(name, label, options, value) {
   return `
     <div class="field">
-      <label>${label}</label>
-      <select data-club-input="${name}">
+      <label>${escapeHtml(label)}</label>
+      <select data-club-input="${escapeHtml(name)}">
         ${options.map((option) => `<option ${option === value ? "selected" : ""}>${escapeHtml(option)}</option>`).join("")}
       </select>
     </div>
@@ -193,8 +193,8 @@ export function clubSelectField(name, label, options, value) {
 export function clubTextArea(name, label, value) {
   return `
     <div class="field">
-      <label>${label}</label>
-      <textarea data-club-input="${name}">${escapeHtml(value || "")}</textarea>
+      <label>${escapeHtml(label)}</label>
+      <textarea data-club-input="${escapeHtml(name)}">${escapeHtml(value || "")}</textarea>
     </div>
   `;
 }

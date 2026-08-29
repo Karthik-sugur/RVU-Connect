@@ -74,8 +74,10 @@ export async function renderCurrentRoute() {
     const tab = state.adminTab || "requests";
     let needsLoad = false;
     if (tab === "requests" && state.hostRequests.length === 0) needsLoad = true;
-    else if (tab === "flags" && state.moderationFlags.length === 0) needsLoad = true;
+    else if ((tab === "flags" || tab === "moderation") && state.moderationFlags.length === 0) needsLoad = true;
     else if (tab === "users" && state.allUsers.length === 0) needsLoad = true;
+    else if (tab === "clubs" && state.allClubs.length === 0) needsLoad = true;
+    else if (tab === "schools" && state.allSchools.length === 0) needsLoad = true;
     else if (tab === "events" && state.allEvents.length === 0) needsLoad = true;
     else if (tab === "announcements" && state.allAnnouncements.length === 0) needsLoad = true;
     else if (tab === "contentReviews" && state.contentReviews.length === 0) needsLoad = true;
@@ -92,8 +94,10 @@ export async function renderCurrentRoute() {
           } catch (_) { /* optional */ }
         }
       }
-      else if (tab === "flags") state.moderationFlags = (await window.RVUFirebase.loadAdminTab(tab)).docs || [];
+      else if (tab === "flags" || tab === "moderation") state.moderationFlags = (await window.RVUFirebase.loadAdminTab(tab)).docs || [];
       else if (tab === "users") state.allUsers = (await window.RVUFirebase.loadAdminTab(tab)).docs || [];
+      else if (tab === "clubs") state.allClubs = (await window.RVUFirebase.loadAdminTab(tab)).docs || [];
+      else if (tab === "schools") state.allSchools = (await window.RVUFirebase.loadAdminTab(tab)).docs || [];
       else if (tab === "events") state.allEvents = (await window.RVUFirebase.loadAdminTab(tab)).docs || [];
       else if (tab === "announcements") state.allAnnouncements = (await window.RVUFirebase.loadAdminTab(tab)).docs || [];
       else if (tab === "contentReviews") state.contentReviews = (await window.RVUFirebase.loadAdminTab(tab)).docs || [];
