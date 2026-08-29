@@ -11,10 +11,9 @@ export const CONFIG = {
   auth: {
     // Hosts that proxy /__/auth to Firebase (see vercel.json). Listing a host here makes
     // the OAuth handler first-party, which is what iOS Safari needs to keep its
-    // sessionStorage. EMPTY ON PURPOSE: Google returns redirect_uri_mismatch until
-    // https://<host>/__/auth/handler is added to the OAuth client's authorised redirect
-    // URIs in Google Cloud Console. Add the URI there first, then list the host here.
-    sameOriginAuthDomainHosts: [],
+    // sessionStorage. Requires https://<host>/__/auth/handler in the OAuth client's
+    // authorised redirect URIs (Google Cloud Console) before listing the host here.
+    sameOriginAuthDomainHosts: ["rvu-connect.vercel.app"],
   },
   appCheck: {
     debugToken: true,
