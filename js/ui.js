@@ -854,7 +854,7 @@ export function renderClubDetail() {
     <section class="${heroClass}"${accentAttr}>
       ${identity.bannerUrl ? `<img class="club-detail-wallpaper" src="${identity.bannerUrl}" alt="">` : ""}
       <button class="back-link" data-action="back-to-clubs">Back to all clubs</button>
-      ${identity.logoUrl ? "" : `<div class="club-detail-mark">${escapeHtml(identity.initials)}</div>`}
+      ${identity.logoUrl || identity.bannerUrl ? "" : `<div class="club-detail-mark">${escapeHtml(identity.initials)}</div>`}
       <div class="club-detail-heading">
         ${identity.logoUrl ? `<div class="club-detail-logo"><img src="${identity.logoUrl}" alt=""></div>` : ""}
         <div>
