@@ -698,12 +698,15 @@ p {
   position: relative;
 }
 
+/* Matches the detail hero: the photo stays saturated and the type flips to
+   light, rather than the photo being veiled to keep dark type readable. */
 .club-top.has-cover {
   margin: -16px -16px 0;
   padding: 16px;
-  min-height: 84px;
+  min-height: 108px;
+  align-items: flex-end;
   overflow: hidden;
-  background: var(--paper);
+  background: var(--ink);
 }
 
 .club-card-cover {
@@ -719,13 +722,27 @@ p {
   content: "";
   position: absolute;
   inset: 0;
-  background: linear-gradient(180deg, rgba(250, 248, 243, 0.7), rgba(250, 248, 243, 0.86));
+  background: linear-gradient(180deg, rgba(18, 25, 29, 0.12) 0%, rgba(18, 25, 29, 0.5) 55%, rgba(18, 25, 29, 0.8) 100%);
   pointer-events: none;
 }
 
 .club-top.has-cover > :not(.club-card-cover) {
   position: relative;
   z-index: 1;
+}
+
+.club-top.has-cover h3 {
+  color: #fff8ea;
+}
+
+.club-top.has-cover .tag.gold {
+  border-color: rgba(255, 248, 234, 0.34);
+  background: rgba(18, 25, 29, 0.42);
+  color: var(--gold);
+}
+
+.club-top.has-cover .avatar {
+  box-shadow: inset 0 0 0 1px rgba(255, 248, 234, 0.34);
 }
 
 .avatar {
