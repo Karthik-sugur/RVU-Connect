@@ -1990,10 +1990,12 @@ textarea {
   --club-accent: var(--teal);
 }
 
+/* Deliberately not var(--red): that tone is reserved for error states, and
+   reusing it as a club brand color reads as a warning. */
 .club-card[data-accent="rust"],
 .club-detail-hero[data-accent="rust"],
 .club-detail-layout[data-accent="rust"] {
-  --club-accent: var(--red);
+  --club-accent: #a35233;
 }
 
 .club-card[data-accent="cream"],
@@ -2898,8 +2900,16 @@ textarea {
   background-size: 42px 42px;
 }
 
+/* A club photo is arbitrary, so contrast cannot be guaranteed against the cream
+   page. Wallpaper clubs get a dark cover instead: the image keeps its full
+   saturation and the type flips to light, which reads on any photo. */
 .club-detail-hero.has-wallpaper {
-  background: var(--paper);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: 62svh;
+  border-bottom-color: var(--ink);
+  background: var(--ink);
 }
 
 .club-detail-wallpaper {
@@ -2911,13 +2921,12 @@ textarea {
   pointer-events: none;
 }
 
-/* Scrim keeps the display type readable over an arbitrary club photo. It paints
-   above the image and below the content, which carries z-index 1. */
+/* Paints above the image and below the content, which carries z-index 1. */
 .club-detail-hero.has-wallpaper::after {
   content: "";
   position: absolute;
   inset: 0;
-  background: linear-gradient(180deg, rgba(250, 248, 243, 0.68), rgba(250, 248, 243, 0.82));
+  background: linear-gradient(180deg, rgba(18, 25, 29, 0.15) 0%, rgba(18, 25, 29, 0.52) 55%, rgba(18, 25, 29, 0.82) 100%);
   pointer-events: none;
 }
 
@@ -2926,10 +2935,46 @@ textarea {
   z-index: 1;
 }
 
+.club-detail-hero.has-wallpaper .back-link {
+  align-self: flex-start;
+  margin-bottom: auto;
+  border-color: rgba(255, 248, 234, 0.42);
+  background: rgba(18, 25, 29, 0.42);
+  color: #fff8ea;
+}
+
+.club-detail-hero.has-wallpaper .section-num {
+  border-color: rgba(255, 248, 234, 0.34);
+  color: var(--gold);
+}
+
+.club-detail-hero.has-wallpaper h1 {
+  color: #fff8ea;
+}
+
+.club-detail-hero.has-wallpaper p {
+  color: rgba(255, 248, 234, 0.9);
+}
+
 .club-detail-hero.has-wallpaper .club-detail-meta span {
-  border-color: rgba(26, 24, 20, 0.18);
-  background: rgba(250, 248, 243, 0.82);
-  color: var(--ink2);
+  border-color: rgba(255, 248, 234, 0.34);
+  background: rgba(18, 25, 29, 0.42);
+  color: rgba(255, 248, 234, 0.92);
+}
+
+.club-detail-hero.has-wallpaper .btn.secondary {
+  border-color: rgba(255, 248, 234, 0.55);
+  background: rgba(18, 25, 29, 0.42);
+  color: #fff8ea;
+}
+
+.club-detail-hero.has-wallpaper .btn.secondary:hover {
+  background: #fff8ea;
+  color: var(--ink);
+}
+
+.club-detail-hero.has-wallpaper .club-detail-logo {
+  border-color: rgba(255, 248, 234, 0.42);
 }
 
 .club-detail-heading {
@@ -2959,10 +3004,11 @@ textarea {
   border-color: color-mix(in srgb, var(--club-accent) 40%, var(--line));
 }
 
-/* Over a photo the chip needs an opaque base, or the accent tint muddies. */
+/* On the dark cover the accent tint would muddy, so the chip keeps the dark base
+   and only borrows the accent for its edge. */
 .club-detail-hero.has-wallpaper[data-accent] .club-detail-meta span {
-  background: color-mix(in srgb, var(--club-accent) 12%, rgba(250, 248, 243, 0.86));
-  border-color: color-mix(in srgb, var(--club-accent) 40%, rgba(26, 24, 20, 0.18));
+  background: rgba(18, 25, 29, 0.42);
+  border-color: color-mix(in srgb, var(--club-accent) 55%, rgba(255, 248, 234, 0.34));
 }
 
 .club-detail-layout[data-accent] .section-num {
@@ -3098,6 +3144,12 @@ textarea {
 
 .club-detail-layout[data-accent] .club-panel::before {
   background: var(--club-accent);
+}
+
+/* Join is the one panel with an action, so it gets the accent wash. Without this
+   all four panels carry identical weight and the primary path is not obvious. */
+.club-detail-layout[data-accent] .club-join-panel {
+  background: color-mix(in srgb, var(--club-accent) 6%, var(--paper));
 }
 
 .club-identity-preview {
