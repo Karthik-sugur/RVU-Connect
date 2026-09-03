@@ -1,4 +1,4 @@
-import { icon, multiSelectField, selectField, inputField, clubInputField, clubSelectField, clubTextArea, unique, escapeHtml, modalSelectField, safeUrl } from './utils.js';
+import { icon, multiSelectField, selectField, inputField, clubInputField, clubSelectField, clubTextArea, unique, escapeHtml, modalSelectField, safeUrl, clubIdentity, CLUB_ACCENTS } from './utils.js';
 import { schools, interests, events, clubs, announcements, projects, state, app } from './state.js';
 import { isClubCore, isSchoolRep, isSuperAdmin, canHost, canManageClub, canManageEvent, canManageAnnouncement, isFollowingClub, isItemSaved, platformSettings, roleLabel, activeClub } from './auth.js';
 import { bindEvents } from './main.js';
@@ -847,14 +847,21 @@ export function renderClubDetail() {
   const following = isFollowingClub(club.id || club.slug);
   const coreMembers = state.clubCoreMembers || [];
   const myEmail = (state.authUser?.email || "").trim().toLowerCase();
+  const identity = clubIdentity(club);
+  const heroClass = ["club-detail-hero", identity.bannerUrl ? "has-wallpaper" : ""].filter(Boolean).join(" ");
+  const accentAttr = identity.accent ? ` data-accent="${identity.accent}"` : "";
   return `
-    <section class="club-detail-hero">
+    <section class="${heroClass}"${accentAttr}>
+      ${identity.bannerUrl ? `<img class="club-detail-wallpaper" src="${identity.bannerUrl}" alt="">` : ""}
       <button class="back-link" data-action="back-to-clubs">Back to all clubs</button>
-      <div class="club-detail-mark">${club.name.split(" ").map((word) => word[0]).slice(0, 2).join("")}</div>
-      <div>
-        ${sectionLabel("03", club.category)}
-        <h1>${escapeHtml(club.name)}</h1>
-        <p>${escapeHtml(club.tagline || "")}</p>
+      ${identity.logoUrl ? "" : `<div class="club-detail-mark">${escapeHtml(identity.initials)}</div>`}
+      <div class="club-detail-heading">
+        ${identity.logoUrl ? `<div class="club-detail-logo"><img src="${identity.logoUrl}" alt=""></div>` : ""}
+        <div>
+          ${sectionLabel("03", club.category)}
+          <h1>${escapeHtml(club.name)}</h1>
+          <p>${escapeHtml(club.tagline || "")}</p>
+        </div>
       </div>
       <div class="club-detail-meta">
         <span>${escapeHtml(club.school || "RVU")}</span>
@@ -870,7 +877,7 @@ export function renderClubDetail() {
         ` : ""}
       </div>
     </section>
-    <section class="club-detail-layout">
+    <section class="club-detail-layout"${accentAttr}>
       <article class="club-panel club-about">
         <span class="section-num">About</span>
         <h2>What they do</h2>
@@ -930,6 +937,19 @@ export function renderClubDetail() {
 
 export function renderEditClubModal(club = {}) {
   const highlightsText = Array.isArray(club.highlights) ? club.highlights.join("\n") : (club.highlights || "");
+  const draft = state.editClubIdentity || {};
+  const logoPreview = safeUrl(draft.logoUrl || club.logoUrl);
+  const bannerPreview = safeUrl(draft.bannerUrl || club.bannerUrl);
+  const accent = CLUB_ACCENTS.includes(draft.accent) ? draft.accent : "";
+  const initials = clubIdentity(club).initials;
+  const swatches = [
+    { id: "default", label: "Campus", color: "#c8b89a" },
+    { id: "gold", label: "Gold", color: "#d0a863" },
+    { id: "ink", label: "Ink", color: "#1a1814" },
+    { id: "teal", label: "Teal", color: "#2a6b5e" },
+    { id: "rust", label: "Rust", color: "#b84942" },
+    { id: "cream", label: "Cream", color: "#8a7a6a" },
+  ];
   return `
     <div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px 0 80px;">
       <div style="background:#f5f2ec;width:100%;max-width:600px;margin:0 16px;">
@@ -938,6 +958,34 @@ export function renderEditClubModal(club = {}) {
           <button style="background:none;border:none;font-size:20px;color:#8a7a6a;cursor:pointer;" data-action="close-edit-club">×</button>
         </div>
         <div style="padding:24px;">
+          <div style="margin-bottom:20px;padding-bottom:20px;border-bottom:1.5px solid #d8cfc4;">
+            <p style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin:0 0 12px;font-family:inherit;">Identity</p>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+              <div>
+                <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Profile picture</label>
+                <div class="club-identity-preview">
+                  ${logoPreview ? `<img src="${logoPreview}" alt="">` : `<span>${escapeHtml(initials)}</span>`}
+                </div>
+                <input id="ec-logo-url" type="url" maxlength="1000" data-club-identity-url="logoUrl" value="${escapeHtml(draft.logoUrl || club.logoUrl || "")}" placeholder="https://.../logo.png" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:12px;font-family:inherit;color:#1a1a1a;outline:none;margin-top:8px;" />
+              </div>
+              <div>
+                <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Wallpaper</label>
+                <div class="club-identity-preview club-identity-preview-wide">
+                  ${bannerPreview ? `<img src="${bannerPreview}" alt="">` : `<span>None</span>`}
+                </div>
+                <input id="ec-banner-url" type="url" maxlength="1000" data-club-identity-url="bannerUrl" value="${escapeHtml(draft.bannerUrl || club.bannerUrl || "")}" placeholder="https://.../wallpaper.jpg" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:12px;font-family:inherit;color:#1a1a1a;outline:none;margin-top:8px;" />
+              </div>
+            </div>
+            <p style="font-size:10px;color:#8a7a6a;margin:-8px 0 16px;font-family:inherit;">Free-plan mode: paste direct public image links. Clear a field to remove that image. Images are not stored in Firebase.</p>
+            <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Accent</label>
+            <div class="club-accent-swatches">
+              ${swatches.map((swatch) => {
+                const active = (swatch.id === "default" && !accent) || swatch.id === accent;
+                return `<button type="button" class="club-accent-swatch${active ? " active" : ""}" data-action="set-club-accent" data-accent="${swatch.id}" title="${escapeHtml(swatch.label)}" style="background:${swatch.color};">${escapeHtml(swatch.label)}</button>`;
+              }).join("")}
+            </div>
+            <p style="font-size:10px;color:#8a7a6a;margin:8px 0 0;font-family:inherit;">Campus default keeps the current look. Accent tints this club’s tile and page only.</p>
+          </div>
           <div style="margin-bottom:16px;">
             <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8a7a6a;margin-bottom:8px;font-family:inherit;">Tagline</label>
             <input id="ec-tagline" type="text" value="${escapeHtml(club.tagline || "")}" style="width:100%;border:1.5px solid #c8b89a;background:transparent;padding:10px 12px;font-size:14px;font-family:inherit;color:#1a1a1a;outline:none;" />
@@ -1814,10 +1862,13 @@ export function renderClubCard(club) {
   const clubId = club.id || club.slug;
   const clubEvents = events.filter((event) => event.club === club.name || event.host === club.name || event.clubId === clubId).length;
   const following = isFollowingClub(clubId);
+  const identity = clubIdentity(club);
+  const accentAttr = identity.accent ? ` data-accent="${identity.accent}"` : "";
   return `
-    <article class="card club-card" data-club-card="${club.slug || club.id}">
-      <div class="club-top">
-        <div class="avatar">${escapeHtml(club.name.split(" ").map((word) => word[0]).slice(0, 2).join(""))}</div>
+    <article class="card club-card" data-club-card="${club.slug || club.id}"${accentAttr}>
+      <div class="club-top${identity.bannerUrl ? " has-cover" : ""}">
+        ${identity.bannerUrl ? `<img class="club-card-cover" src="${identity.bannerUrl}" alt="">` : ""}
+        <div class="avatar">${identity.logoUrl ? `<img src="${identity.logoUrl}" alt="">` : escapeHtml(identity.initials)}</div>
         <div><h3>${escapeHtml(club.name)}</h3><span class="tag gold">${escapeHtml(club.category || "Club")}</span></div>
       </div>
       <p>${escapeHtml(club.tagline || club.description || "")}</p>

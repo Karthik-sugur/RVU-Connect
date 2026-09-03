@@ -203,6 +203,37 @@ export function unique(values) {
   return [...new Set(values)];
 }
 
+export const CLUB_ACCENTS = ["gold", "ink", "teal", "rust", "cream"];
+
+export function clubInitials(name) {
+  return String(name || "C")
+    .split(/\s+/)
+    .map((word) => word[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+}
+
+export function clubIdentity(club = {}) {
+  const accent = CLUB_ACCENTS.includes(club.accent) ? club.accent : "";
+  return {
+    initials: clubInitials(club.name),
+    logoUrl: safeUrl(club.logoUrl),
+    bannerUrl: safeUrl(club.bannerUrl),
+    accent,
+  };
+}
+
+export function defaultClubIdentityDraft(club = {}) {
+  const identity = clubIdentity(club);
+  return {
+    logoUrl: club.logoUrl || "",
+    bannerUrl: club.bannerUrl || "",
+    accent: identity.accent,
+  };
+}
+
 /**
  * Escape for text AND attribute contexts. Quotes must be escaped — this is interpolated into
  * double-quoted attributes everywhere, and leaving them intact allows attribute breakout.

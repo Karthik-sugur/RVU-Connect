@@ -2,7 +2,7 @@ import { ROLES, STATUSES, ROUTES } from "./constants.js";
 import { logger } from "./logger.js";
 import { validateEvent, validateAnnouncement, validateProject } from "./validation.js";
 
-import { promptUser, validateClubDraft, replaceCollection } from './utils.js';
+import { promptUser, validateClubDraft, replaceCollection, defaultClubIdentityDraft, CLUB_ACCENTS, safeUrl } from './utils.js';
 import { schools, interests, events, clubs, announcements, projects, state, defaultClubDraft, app } from './state.js';
 import { isClubCore, isSchoolRep, isSuperAdmin, canHost, canManageClub, canManageEvent, activeClub, isAllowedRvuEmail, syncFirebaseData, softRefreshCampusData, startPendingAccessPolling, enterAuthenticatedApp, enterDemoApp, handleSignOut, startFirebaseLogin } from './auth.js';
 import { render, renderAtTop, renderSearchResultsHtml, isProjectOwner } from './ui.js';
@@ -126,6 +126,20 @@ export function bindEvents() {
     });
     field.addEventListener("change", () => {
       state.clubDraft[field.dataset.clubInput] = field.value;
+    });
+  });
+
+  document.querySelectorAll("[data-club-identity-url]").forEach((field) => {
+    field.addEventListener("input", () => {
+      if (state.editClubIdentity) {
+        state.editClubIdentity[field.dataset.clubIdentityUrl] = field.value;
+      }
+    });
+    field.addEventListener("change", () => {
+      if (state.editClubIdentity) {
+        state.editClubIdentity[field.dataset.clubIdentityUrl] = field.value.trim();
+        render();
+      }
     });
   });
 
@@ -1607,15 +1621,27 @@ export async function handleAction(action, dataset) {
       window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Only club core members of this club can edit it.", type: "error" } }));
       return;
     }
+    if (state.editClubId !== dataset.docid) {
+      state.editClubIdentity = defaultClubIdentityDraft(club);
+    }
     state.editClubOpen = true;
     state.editClubId = dataset.docid;
     renderAtTop();
     return;
   }
   if (action === "close-edit-club") {
+    state.editClubIdentity = null;
     state.editClubOpen = false;
     state.editClubId = null;
     renderAtTop();
+    return;
+  }
+  if (action === "set-club-accent") {
+    if (!state.editClubIdentity) return;
+    const value = dataset.accent === "default" ? "" : dataset.accent;
+    if (value && !CLUB_ACCENTS.includes(value)) return;
+    state.editClubIdentity.accent = value;
+    render();
     return;
   }
   if (action === "submit-edit-club") {
@@ -1629,13 +1655,21 @@ export async function handleAction(action, dataset) {
     const description = document.getElementById("ec-description")?.value?.trim() || "";
     const doing = document.getElementById("ec-doing")?.value?.trim() || "";
     const joinLink = document.getElementById("ec-join")?.value?.trim() || "";
+    const logoUrl = document.getElementById("ec-logo-url")?.value?.trim() || "";
+    const bannerUrl = document.getElementById("ec-banner-url")?.value?.trim() || "";
     const highlightsRaw = document.getElementById("ec-highlights")?.value || "";
     const highlights = highlightsRaw.split("\n").map((s) => s.trim()).filter(Boolean);
     if (joinLink && !/^https?:\/\//.test(joinLink)) {
       window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Join link must start with http:// or https://", type: "info" } }));
       return;
     }
+    if ((logoUrl && !safeUrl(logoUrl)) || (bannerUrl && !safeUrl(bannerUrl))) {
+      window.dispatchEvent(new CustomEvent("rvu-toast", { detail: { message: "Image links must start with https:// or http://", type: "info" } }));
+      return;
+    }
     try {
+      const draft = state.editClubIdentity || defaultClubIdentityDraft(club);
+      const accent = CLUB_ACCENTS.includes(draft.accent) ? draft.accent : "";
       await window.RVUFirebase.updateClubProfile(dataset.docid, {
         tagline,
         description,
@@ -1643,8 +1677,12 @@ export async function handleAction(action, dataset) {
         join: joinLink,
         joinLink,
         highlights,
+        logoUrl,
+        bannerUrl,
+        accent,
       });
-      Object.assign(club, { tagline, description, doing, join: joinLink, joinLink, highlights });
+      Object.assign(club, { tagline, description, doing, join: joinLink, joinLink, highlights, logoUrl, bannerUrl, accent });
+      state.editClubIdentity = null;
       state.editClubOpen = false;
       state.editClubId = null;
       renderAtTop();

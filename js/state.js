@@ -128,6 +128,7 @@ export const state = {
   _clubApplyModalOpen: false,
   editClubOpen: false,
   editClubId: null,
+  editClubIdentity: null,
   clubCoreMembers: [],
   _clubCoreMembersLoading: false,
   managedClubMembers: {},
